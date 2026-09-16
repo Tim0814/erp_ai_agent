@@ -8,6 +8,8 @@
 export interface Order {
   /** 訂單唯一識別碼 */
   orderId: string;
+  /** 父層銷售訂單編號，用於寫入分配建議 */
+  parentOrderId: string;
   /** 客戶識別碼，對應 Customer.customerId */
   customerId: string;
   /** 商品識別碼，對應 Batch.productId；硬性規則會以此欄位篩掉不同商品的批次 */

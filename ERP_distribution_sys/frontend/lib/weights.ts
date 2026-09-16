@@ -29,6 +29,47 @@ export const DEFAULT_WEIGHTS: Readonly<CompanyWeights> = Object.freeze({
   regionCluster: 0.08,
 });
 
+/**
+ * 將 DB 權重依啟用旗標過濾後，按原始比例正規化為總和 1。
+ */
+export function normalizeEnabledWeights(raw: unknown): CompanyWeights {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('公司權重設定不存在或格式無效，無法執行分配計算');
+  }
+
+  const row = raw as Record<string, unknown>;
+  const entries: Array<[keyof CompanyWeights, string, string]> = [
+    ['expiry', 'fefo_weight', 'fefo_enabled'],
+    ['urgency', 'urgency_weight', 'urgency_enabled'],
+    ['orderTime', 'order_time_weight', 'order_time_enabled'],
+    ['customerTier', 'customer_tier_weight', 'customer_tier_enabled'],
+    ['regionCluster', 'region_weight', 'region_enabled'],
+  ];
+
+  const enabledWeights = entries
+    .filter(([, , enabledKey]) => row[enabledKey] === true)
+    .map(([key, weightKey]) => [key, Number(row[weightKey])] as const);
+
+  if (enabledWeights.length === 0) {
+    throw new Error('公司權重設定中沒有啟用任何評分項目，無法執行分配計算');
+  }
+
+  const total = enabledWeights.reduce((sum, [, value]) => sum + value, 0);
+  if (!Number.isFinite(total) || total <= 0 || enabledWeights.some(([, value]) => !Number.isFinite(value) || value < 0)) {
+    throw new Error('公司權重設定包含無效數值，無法執行分配計算');
+  }
+
+  const normalized: CompanyWeights = {
+    expiry: 0,
+    urgency: 0,
+    orderTime: 0,
+    customerTier: 0,
+    regionCluster: 0,
+  };
+  for (const [key, value] of enabledWeights) normalized[key] = value / total;
+  return normalized;
+}
+
 // ─── 驗證函式 ──────────────────────────────────────────────────────────────────
 
 /**

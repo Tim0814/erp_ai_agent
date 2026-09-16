@@ -2,18 +2,11 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { runAllocation } from '../lib/allocationEngine.js';
+import { fetchBatches, fetchCustomers, fetchOrders, fetchCompanyWeights } from '../lib/dataSource.js';
 import type { AllocationInput, Order, Customer, Batch, CompanyWeights, AllocationResult } from '../lib/types.js';
-import mockData from '../lib/mockData.json' with { type: 'json' };
-import { DEFAULT_WEIGHTS } from '../lib/weights.js';
+import { DEFAULT_WEIGHTS, normalizeEnabledWeights } from '../lib/weights.js';
 
 // ─── 輔助函式 ──────────────────────────────────────────────────────────────────
-
-function calculateConfidence(status: string, totalScore: number): string {
-  if (status === 'blocked') return 'manual';
-  if (totalScore >= 80) return 'auto_recommend';
-  if (totalScore >= 60) return 'review';
-  return 'low_confidence';
-}
 
 /**
  * 從 Supabase 查詢目前資料庫中所有「未取消」的分配紀錄，
@@ -47,28 +40,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const body = req.body ?? {};
-    const inputData =
-      body && typeof body === 'object' && body.orders && body.batches
-        ? body
-        : mockData;
+    const shouldUseRequestBody =
+      body && typeof body === 'object' && Array.isArray((body as any).orders) && Array.isArray((body as any).batches);
 
-    // 反序列化：把 JSON 字串日期轉回 Date 物件
-    const orders: Order[] = inputData.orders.map((o: any) => ({
-      ...o,
-      requestedDate: new Date(o.requestedDate),
-      createdAt: new Date(o.createdAt),
-    }));
+    const orders: Order[] = shouldUseRequestBody
+      ? (body as any).orders.map((o: any) => ({
+          ...o,
+          parentOrderId: String(o.parentOrderId ?? o.orderId ?? ''),
+          requestedDate: new Date(o.requestedDate),
+          createdAt: new Date(o.createdAt),
+        }))
+      : await fetchOrders();
 
-    const batches: Batch[] = inputData.batches.map((b: any) => ({
-      ...b,
-      expiryDate: new Date(b.expiryDate),
-    }));
+    const batches: Batch[] = shouldUseRequestBody
+      ? (body as any).batches.map((b: any) => ({
+          ...b,
+          expiryDate: new Date(b.expiryDate),
+        }))
+      : await fetchBatches();
+
+    const customers: Customer[] = shouldUseRequestBody
+      ? (body as any).customers ?? []
+      : await fetchCustomers();
 
     const customersMap = new Map<string, Customer>(
-      (inputData.customers ?? []).map((c: any) => [c.customerId, c as Customer])
+      customers.map((c: any) => [c.customerId, c as Customer])
     );
 
-    const weights: CompanyWeights = inputData.weights ?? DEFAULT_WEIGHTS;
+    const dbWeights = shouldUseRequestBody ? null : await fetchCompanyWeights();
+    const weights: CompanyWeights = shouldUseRequestBody
+      ? ((body as any).weights ?? DEFAULT_WEIGHTS)
+      : dbWeights
+        ? normalizeEnabledWeights(dbWeights)
+        : DEFAULT_WEIGHTS;
 
     // 建立 Supabase client（若環境變數存在）；查詢現有未取消的分配 batchId 集合
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -90,25 +94,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     const now = new Date().toISOString();
+    const ordersById = new Map(orders.map((order) => [order.orderId, order]));
+    const batchesById = new Map(batches.map((batch) => [batch.batchId, batch]));
     const processed = results.map((item) => ({
       id: randomUUID(),
-      order_id: item.orderId,
+      sales_order: ordersById.get(item.orderId)?.parentOrderId ?? '',
+      item_code: ordersById.get(item.orderId)?.itemCode ?? '',
       batch_id: item.recommendedBatchId,
-      status: item.status,
-      confidence: calculateConfidence(item.status, item.totalScore),
-      total_score: item.totalScore,
-      scores_json: item.scores,
-      explanation: item.explanation ?? '',
-      blocked_reason: item.blockedReason ?? null,
-      signal_color: item.signalColor,
-      // ── 燈號分流欄位（與 status 核准流程互不相關）──────────────────────────
-      // traffic_light：green / yellow / red，由 computeSignal() 判斷
+      warehouse: item.recommendedBatchId ? (batchesById.get(item.recommendedBatchId)?.warehouseRegion || 'unassigned') : 'unassigned',
+      recommended_qty: ordersById.get(item.orderId)?.requestedQty ?? 0,
+      score: item.totalScore,
+      rationale: item.explanation ?? '',
+      fefo_score: item.scores.expiry,
+      urgency_score: item.scores.urgency,
+      order_time_score: item.scores.orderTime,
+      customer_tier_score: item.scores.customerTier,
+      region_score: item.scores.regionCluster,
       traffic_light: item.signalColor,
-      // traffic_light_reason：燈號判斷的具體說明文字
       traffic_light_reason: item.signalReason || null,
-      review_action: null,
-      override_reason: null,
-      reviewed_at: null,
+      status: 'pending',
       created_at: now,
     }));
 
