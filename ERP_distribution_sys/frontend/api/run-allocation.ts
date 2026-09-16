@@ -1,10 +1,21 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { randomUUID } from 'crypto';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { runAllocation } from '../lib/allocationEngine.js';
-import { fetchBatches, fetchCustomers, fetchOrders, fetchCompanyWeights } from '../lib/dataSource.js';
-import type { AllocationInput, Order, Customer, Batch, CompanyWeights, AllocationResult } from '../lib/types.js';
-import { DEFAULT_WEIGHTS, normalizeEnabledWeights } from '../lib/weights.js';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { runAllocation } from "../lib/allocationEngine.js";
+import {
+  fetchBatches,
+  fetchCustomers,
+  fetchOrders,
+  fetchCompanyWeights,
+} from "../lib/dataSource.js";
+import type {
+  AllocationInput,
+  Order,
+  Customer,
+  Batch,
+  CompanyWeights,
+  AllocationResult,
+} from "../lib/types.js";
+import { DEFAULT_WEIGHTS, normalizeEnabledWeights } from "../lib/weights.js";
 
 // ─── 輔助函式 ──────────────────────────────────────────────────────────────────
 
@@ -15,14 +26,19 @@ import { DEFAULT_WEIGHTS, normalizeEnabledWeights } from '../lib/weights.js';
  * 查詢條件：status NOT IN ('cancelled')
  * 若查詢失敗，記錄警告並回傳空集合（降級處理，不阻斷主流程）。
  */
-async function fetchExistingAllocatedBatchIds(supabase: SupabaseClient): Promise<Set<string>> {
+async function fetchExistingAllocatedBatchIds(
+  supabase: SupabaseClient,
+): Promise<Set<string>> {
   const { data, error } = await supabase
-    .from('allocation_recommendations')
-    .select('batch_id')
-    .neq('status', 'cancelled');
+    .from("allocation_recommendations")
+    .select("batch_id")
+    .neq("status", "cancelled");
 
   if (error) {
-    console.warn('[燈號分流] 查詢現有分配紀錄失敗，跳過重複分配檢查：', error.message);
+    console.warn(
+      "[燈號分流] 查詢現有分配紀錄失敗，跳過重複分配檢查：",
+      error.message,
+    );
     return new Set<string>();
   }
 
@@ -36,17 +52,21 @@ async function fetchExistingAllocatedBatchIds(supabase: SupabaseClient): Promise
 // ─── Vercel Serverless Handler ─────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const body = req.body ?? {};
     const shouldUseRequestBody =
-      body && typeof body === 'object' && Array.isArray((body as any).orders) && Array.isArray((body as any).batches);
+      body &&
+      typeof body === "object" &&
+      Array.isArray((body as any).orders) &&
+      Array.isArray((body as any).batches);
 
     const orders: Order[] = shouldUseRequestBody
       ? (body as any).orders.map((o: any) => ({
           ...o,
-          parentOrderId: String(o.parentOrderId ?? o.orderId ?? ''),
+          parentOrderId: String(o.parentOrderId ?? o.orderId ?? ""),
           requestedDate: new Date(o.requestedDate),
           createdAt: new Date(o.createdAt),
         }))
@@ -60,11 +80,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : await fetchBatches();
 
     const customers: Customer[] = shouldUseRequestBody
-      ? (body as any).customers ?? []
+      ? ((body as any).customers ?? [])
       : await fetchCustomers();
 
     const customersMap = new Map<string, Customer>(
-      customers.map((c: any) => [c.customerId, c as Customer])
+      customers.map((c: any) => [c.customerId, c as Customer]),
     );
 
     const dbWeights = shouldUseRequestBody ? null : await fetchCompanyWeights();
@@ -83,10 +103,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (supabaseUrl && supabaseKey) {
       supabase = createClient(supabaseUrl, supabaseKey);
       // 在執行分配引擎之前先查詢，確保燈號判斷能偵測跨執行期的重複分配
-      existingAllocatedBatchIds = await fetchExistingAllocatedBatchIds(supabase);
+      existingAllocatedBatchIds =
+        await fetchExistingAllocatedBatchIds(supabase);
     }
 
-    const input: AllocationInput = { orders, customers: customersMap, batches, weights };
+    const input: AllocationInput = {
+      orders,
+      customers: customersMap,
+      batches,
+      weights,
+    };
 
     // 將現有分配集合傳入引擎，引擎內部同步進行燈號分流
     const results: AllocationResult[] = await runAllocation(input, {
@@ -97,14 +123,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ordersById = new Map(orders.map((order) => [order.orderId, order]));
     const batchesById = new Map(batches.map((batch) => [batch.batchId, batch]));
     const processed = results.map((item) => ({
-      id: randomUUID(),
-      sales_order: ordersById.get(item.orderId)?.parentOrderId ?? '',
-      item_code: ordersById.get(item.orderId)?.itemCode ?? '',
+      sales_order: ordersById.get(item.orderId)?.parentOrderId ?? "",
+      item_code: ordersById.get(item.orderId)?.itemCode ?? "",
       batch_id: item.recommendedBatchId,
-      warehouse: item.recommendedBatchId ? (batchesById.get(item.recommendedBatchId)?.warehouseRegion || 'unassigned') : 'unassigned',
+      warehouse: item.recommendedBatchId
+        ? batchesById.get(item.recommendedBatchId)?.warehouseRegion ||
+          "unassigned"
+        : "unassigned",
       recommended_qty: ordersById.get(item.orderId)?.requestedQty ?? 0,
       score: item.totalScore,
-      rationale: item.explanation ?? '',
+      rationale: item.explanation ?? "",
       fefo_score: item.scores.expiry,
       urgency_score: item.scores.urgency,
       order_time_score: item.scores.orderTime,
@@ -112,23 +140,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       region_score: item.scores.regionCluster,
       traffic_light: item.signalColor,
       traffic_light_reason: item.signalReason || null,
-      status: 'pending',
+      status: "pending",
       created_at: now,
     }));
 
     if (supabase) {
       for (const rec of processed) {
-        const { error } = await supabase.from('allocation_recommendations').insert(rec);
+        const { error } = await supabase
+          .from("allocation_recommendations")
+          .insert(rec);
         if (error) {
-          console.error('Supabase insert error:', error);
+          console.error("Supabase insert error:", error);
           throw new Error(`Failed to insert recommendation: ${error.message}`);
         }
       }
     }
 
-    return res.status(200).json({ success: true, count: processed.length, data: processed });
+    return res
+      .status(200)
+      .json({ success: true, count: processed.length, data: processed });
   } catch (error) {
-    console.error('Run allocation error:', error);
-    return res.status(500).json({ error: 'Internal server error', details: error instanceof Error ? error.message : String(error) });
+    console.error("Run allocation error:", error);
+    return res.status(500).json({
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 }
