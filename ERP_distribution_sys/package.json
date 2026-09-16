@@ -2,39 +2,8 @@
   "name": "erp-distribution-sys",
   "version": "1.0.0",
   "description": "食品供應鏈訂單分配建議引擎（Rules-based Allocation Engine）",
-  "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
-    "server": "ts-node src/apiServer.ts",
-    "test": "jest --runInBand",
-    "test:run": "jest --runInBand --forceExit",
-    "lint": "eslint src --ext .ts"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.14.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.4",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.116.0",
-    "cors": "^2.8.6",
-    "dotenv": "^16.6.1",
-    "express": "^5.2.1"
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "roots": [
-      "<rootDir>/src"
-    ],
-    "testMatch": [
-      "**/__tests__/**/*.test.ts"
-    ],
-    "collectCoverage": false
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build"
   }
 }
