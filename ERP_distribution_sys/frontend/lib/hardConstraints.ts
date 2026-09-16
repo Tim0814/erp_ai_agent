@@ -2,9 +2,9 @@
  * 硬性規則過濾器（Hard Constraints）
  *
  * 在進入評分之前執行，以下情況直接淘汰候選批次：
- * 1. batch.availableQty < order.requestedQty（庫存不足）
+ * 1. batch.productId !== order.itemCode（商品不符，最優先過濾）
  * 2. batch.expiryDate < today（已過期）
- * 3. 即時扣減後剩餘量不足（超賣防護）
+ * 3. batch.availableQty < order.requestedQty（庫存不足／超賣防護）
  *
  * 這些規則與評分邏輯完全分離，不影響分數計算。
  */
@@ -43,18 +43,25 @@ export function applyHardConstraints(
 ): FilterResult {
   const todayStart = startOfDay(today);
 
+  const wrongProduct: Batch[] = [];
   const expired: Batch[] = [];
   const insufficient: Batch[] = [];
   const candidates: Batch[] = [];
 
   for (const batch of batches) {
-    // 規則 1：效期檢查（expiryDate < today → 已過期）
+    // 規則 1：商品比對（productId 不符 → 直接淘汰，放最前面效能最好）
+    if (batch.productId !== order.itemCode) {
+      wrongProduct.push(batch);
+      continue;
+    }
+
+    // 規則 2：效期檢查（expiryDate < today → 已過期）
     if (startOfDay(batch.expiryDate) < todayStart) {
       expired.push(batch);
       continue;
     }
 
-    // 規則 2 & 3：庫存量檢查（availableQty 已即時扣減）
+    // 規則 3：庫存量檢查（availableQty 已即時扣減）
     if (batch.availableQty < order.requestedQty) {
       insufficient.push(batch);
       continue;
@@ -68,7 +75,7 @@ export function applyHardConstraints(
   }
 
   // 沒有任何候選批次，組成具體的阻斷原因
-  const reason = buildBlockedReason(batches, expired, insufficient);
+  const reason = buildBlockedReason(batches, expired, insufficient, wrongProduct);
   return { passed: false, reason };
 }
 
@@ -89,12 +96,19 @@ function buildBlockedReason(
   all: Batch[],
   expired: Batch[],
   insufficient: Batch[],
+  wrongProduct: Batch[] = [],
 ): string {
   if (all.length === 0) {
     return '目前無任何可用批次';
   }
 
   const parts: string[] = [];
+
+  if (wrongProduct.length > 0) {
+    parts.push(
+      `${wrongProduct.length} 個批次商品不符（${wrongProduct.map((b) => b.batchId).join(', ')}）`,
+    );
+  }
 
   if (expired.length > 0) {
     parts.push(

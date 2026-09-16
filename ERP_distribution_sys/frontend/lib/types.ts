@@ -10,6 +10,8 @@ export interface Order {
   orderId: string;
   /** 客戶識別碼，對應 Customer.customerId */
   customerId: string;
+  /** 商品識別碼，對應 Batch.productId；硬性規則會以此欄位篩掉不同商品的批次 */
+  itemCode: string;
   /** 客戶要求的數量（單位：任意，與 Batch.availableQty 相同） */
   requestedQty: number;
   /** 客戶要求的交期 */

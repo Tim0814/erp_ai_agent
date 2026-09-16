@@ -3,6 +3,7 @@
     {
       "orderId": "ORD-2026-001",
       "customerId": "CUST-A",
+      "itemCode": "PROD-MILK-01",
       "requestedQty": 100,
       "requestedDate": "2026-09-15T00:00:00.000Z",
       "createdAt": "2026-09-12T08:00:00.000Z"
@@ -10,6 +11,7 @@
     {
       "orderId": "ORD-2026-002",
       "customerId": "CUST-B",
+      "itemCode": "PROD-MILK-01",
       "requestedQty": 150,
       "requestedDate": "2026-09-14T00:00:00.000Z",
       "createdAt": "2026-09-12T09:30:00.000Z"
@@ -17,6 +19,7 @@
     {
       "orderId": "ORD-2026-003",
       "customerId": "CUST-C",
+      "itemCode": "PROD-MILK-01",
       "requestedQty": 450,
       "requestedDate": "2026-09-13T00:00:00.000Z",
       "createdAt": "2026-09-12T10:15:00.000Z"
@@ -56,7 +59,7 @@
     },
     {
       "batchId": "BAT-103",
-      "productId": "PROD-MILK-01",
+      "productId": "PROD-YOGURT-01",
       "availableQty": 500,
       "expiryDate": "2026-10-15T00:00:00.000Z",
       "warehouseRegion": "SOUTH"
