@@ -261,7 +261,7 @@ export async function runAllocation(
     const filterResult = applyHardConstraints(order, workingBatches, today);
 
     if (!filterResult.passed) {
-      // 被阻斷：燈號一律為 red，原因取自阻斷訊息
+      // 被阻斷：燈號一律為 red，原因同時寫入 blockedReason 與 signalReason
       const signal = signalForBlocked(filterResult.reason);
       const blockedResult: AllocationResult = {
         orderId: order.orderId,
@@ -272,7 +272,7 @@ export async function runAllocation(
         explanation: '',
         blockedReason: filterResult.reason,
         signalColor: signal.color,
-        signalReason: signal.reason,
+        signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
       };
       blockedResult.explanation = await explainer.explain(buildPrompt(blockedResult));
       resultMap.set(order.orderId, blockedResult);
@@ -289,21 +289,12 @@ export async function runAllocation(
       pendingOrderRegions,
     );
 
-    // 5c. 選最高分批次，記錄扣減前庫存量，再即時扣減（防超賣）
+    // 5c. 選最高分批次，記錄扣減前庫存量
     const best = ranked[0]!;
     const chosenBatch = workingBatches.find((b) => b.batchId === best.batchId)!;
     const originalAvailableQty = chosenBatch.availableQty; // 扣減前保留，供燈號判斷使用
-    chosenBatch.availableQty -= order.requestedQty;
 
-    // 判斷是 recommended 還是 partial
-    // partial 的情境：批次扣減後剩餘量已見底，其他訂單可能被降級
-    // 這裡的 partial 語意：此訂單被滿足了，但批次已無法再供應其他訂單
-    // （若需要支援「一筆訂單只被部分滿足」的語意，可在此擴充）
-    const status = chosenBatch.availableQty < 0
-      ? 'partial'   // 不應發生（硬規則已擋），保守起見保留
-      : 'recommended';
-
-    // 5d. 燈號分流
+    // 5d. 燈號分流（在庫存扣減之前執行，確保 Red-3/Red-4 可以中止扣減）
     const signal = computeSignal(
       order,
       chosenBatch,
@@ -314,7 +305,40 @@ export async function runAllocation(
       allocatedThisRun,
     );
 
-    // 分配成功後才將此 batchId 加入本次已分配集合
+    // Red-3/Red-4：重複分配——status 改為 blocked，不扣減庫存
+    // blockedReason 與 signalReason 均寫入相同原因，對應 DB blocked_reason / traffic_light_reason
+    if (signal.color === 'red' && (
+      existingAllocatedBatchIds.has(chosenBatch.batchId) ||
+      allocatedThisRun.has(chosenBatch.batchId)
+    )) {
+      const dupResult: AllocationResult = {
+        orderId: order.orderId,
+        status: 'blocked',
+        recommendedBatchId: null,
+        scores: best.scores,
+        totalScore: best.totalScore,
+        explanation: '',
+        blockedReason: signal.reason,
+        signalColor: 'red',
+        signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
+      };
+      dupResult.explanation = await explainer.explain(buildPrompt(dupResult));
+      resultMap.set(order.orderId, dupResult);
+      continue; // 不扣減庫存，不加入 allocatedThisRun
+    }
+
+    // 正常路徑：即時扣減庫存（防超賣）
+    chosenBatch.availableQty -= order.requestedQty;
+
+    // 判斷是 recommended 還是 partial
+    // partial 的情境：批次扣減後剩餘量已見底，其他訂單可能被降級
+    // 這裡的 partial 語意：此訂單被滿足了，但批次已無法再供應其他訂單
+    // （若需要支援「一筆訂單只被部分滿足」的語意，可在此擴充）
+    const status = chosenBatch.availableQty < 0
+      ? 'partial'   // 不應發生（硬規則已擋），保守起見保留
+      : 'recommended';
+
+    // 分配成功，將此 batchId 加入本次已分配集合（Red-4 防呆用）
     allocatedThisRun.add(chosenBatch.batchId);
 
     const result: AllocationResult = {
@@ -324,9 +348,11 @@ export async function runAllocation(
       scores: best.scores,
       totalScore: best.totalScore,
       explanation: '',
-      blockedReason: null,
+      // red 情境（非重複分配類）的原因同時放 blockedReason 與 signalReason；
+      // yellow/green 時 blockedReason 為 null，signalReason 填入判斷理由
+      blockedReason: signal.color === 'red' ? signal.reason : null,
       signalColor: signal.color,
-      signalReason: signal.reason,
+      signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
     };
     result.explanation = await explainer.explain(buildPrompt(result));
     resultMap.set(order.orderId, result);

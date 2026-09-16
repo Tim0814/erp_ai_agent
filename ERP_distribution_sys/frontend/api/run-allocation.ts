@@ -100,9 +100,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       scores_json: item.scores,
       explanation: item.explanation ?? '',
       blocked_reason: item.blockedReason ?? null,
-      // 燈號欄位
       signal_color: item.signalColor,
-      signal_reason: item.signalReason,
+      // ── 燈號分流欄位（與 status 核准流程互不相關）──────────────────────────
+      // traffic_light：green / yellow / red，由 computeSignal() 判斷
+      traffic_light: item.signalColor,
+      // traffic_light_reason：燈號判斷的具體說明文字
+      traffic_light_reason: item.signalReason || null,
       review_action: null,
       override_reason: null,
       reviewed_at: null,
@@ -111,34 +114,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (supabase) {
       for (const rec of processed) {
-        // 寫入前檢查：同一 batch_id 是否已有衝突的分配紀錄
-        //
-        // ⚠️  注意：這裡故意用白名單（.or(...)）而非排除法（.neq('review_action','rejected')）。
-        // 原因：SQL 的 NULL 比較規則是「NULL <> 任何值」結果不為 TRUE，
-        // 所以 .neq('review_action','rejected') 底層轉成 WHERE review_action <> 'rejected'，
-        // 會把 review_action IS NULL 的紀錄一併排除，造成「尚未審核」的佔用紀錄被漏掉。
-        // 改用白名單明確列出算佔用的三種狀態（null / approved / overridden），
-        // 唯一不算佔用的 rejected 自然就被排除，不會有 NULL 漏網的問題。
-        if (rec.batch_id) {
-          const { data: conflicts, error: checkError } = await supabase
-            .from('allocation_recommendations')
-            .select('id, order_id, status, review_action')
-            .eq('batch_id', rec.batch_id)
-            .in('status', ['recommended', 'partial'])
-            .or('review_action.is.null,review_action.eq.approved,review_action.eq.overridden')
-            .limit(1);
-
-          if (checkError) {
-            console.warn('衝突檢查查詢失敗，略過檢查繼續寫入：', checkError.message);
-          } else if (conflicts && conflicts.length > 0) {
-            const c = conflicts[0];
-            return res.status(409).json({
-              error: '分配衝突',
-              message: `批次 ${rec.batch_id} 已存在未結案的分配紀錄（紀錄 ID：${c.id}，訂單：${c.order_id}，狀態：${c.status}，審核動作：${c.review_action ?? '尚未審核'}），無法重複分配。`,
-            });
-          }
-        }
-
         const { error } = await supabase.from('allocation_recommendations').insert(rec);
         if (error) {
           console.error('Supabase insert error:', error);
