@@ -17,6 +17,7 @@ import { validateWeights } from './weights.js';
 import { applyHardConstraints } from './hardConstraints.js';
 import { rankBatches } from './scoring.js';
 import { LlmExplainer, buildPrompt, StubExplainer, SkippedCandidateContext } from './llm.js';
+import { GeminiExplainer } from './llmGemini.js';
 
 // ─── 引擎選項 ──────────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ export async function runAllocation(
 ): Promise<AllocationResult[]> {
   const { orders, customers, batches, weights } = input;
   const today = options.today ?? new Date();
-  const explainer = options.explainer ?? new StubExplainer();
+  const explainer = options.explainer ?? new GeminiExplainer();
   const existingAllocatedBatchIds = options.existingAllocatedBatchIds ?? new Set<string>();
 
   // 步驟 1：驗證權重（不合法直接拋錯，不進行後續計算）
