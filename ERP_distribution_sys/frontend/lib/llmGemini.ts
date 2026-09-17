@@ -1,4 +1,4 @@
-import { LlmExplainer, StubExplainer } from './llm.js';
+import { LlmExplainer, StubExplainer } from "./llm.js";
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -21,8 +21,9 @@ export class GeminiExplainer implements LlmExplainer {
   private readonly fallbackStub: StubExplainer;
 
   constructor(options?: { apiKey?: string; model?: string }) {
-    this.apiKey = options?.apiKey ?? process.env['GEMINI_API_KEY'] ?? '';
-    this.model = options?.model ?? process.env['GEMINI_MODEL'] ?? 'gemini-1.5-flash';
+    this.apiKey = options?.apiKey ?? process.env["GEMINI_API_KEY"] ?? "";
+    this.model =
+      options?.model ?? process.env["GEMINI_MODEL"] ?? "gemini-3.8-flash";
     this.fallbackStub = new StubExplainer();
   }
 
@@ -35,9 +36,9 @@ export class GeminiExplainer implements LlmExplainer {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           contents: [
@@ -54,7 +55,9 @@ export class GeminiExplainer implements LlmExplainer {
 
       if (!response.ok) {
         const errText = await response.text();
-        console.warn(`[GeminiExplainer] API 呼叫失敗 (${response.status})，降級使用 Stub。錯誤細節：${errText}`);
+        console.warn(
+          `[GeminiExplainer] API 呼叫失敗 (${response.status})，降級使用 Stub。錯誤細節：${errText}`,
+        );
         return await this.fallbackStub.explain(prompt);
       }
 
@@ -67,7 +70,7 @@ export class GeminiExplainer implements LlmExplainer {
 
       return text;
     } catch (err) {
-      console.warn('[GeminiExplainer] 網路或請求異常，降級使用 Stub:', err);
+      console.warn("[GeminiExplainer] 網路或請求異常，降級使用 Stub:", err);
       return await this.fallbackStub.explain(prompt);
     }
   }
