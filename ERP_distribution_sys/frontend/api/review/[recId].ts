@@ -10,6 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const { action, override_reason } = req.body ?? {};
+
+  // 前端送來的合法動作值
   const validActions = ['approved', 'overridden', 'rejected'];
   if (!action || !validActions.includes(action)) {
     return res.status(400).json({ error: `Invalid action. Must be one of: ${validActions.join(', ')}` });
@@ -26,13 +28,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const supabase = createClient(supabaseUrl, supabaseKey);
+    const now = new Date().toISOString();
+
+    // action → status 對應：
+    //   'approved'  → status: 'approved'
+    //   'overridden'→ status: 'approved' + is_overridden: true（業務語意：覆寫後核准）
+    //   'rejected'  → status: 'rejected'
+    const newStatus: 'approved' | 'rejected' =
+      action === 'rejected' ? 'rejected' : 'approved';
+
+    const isOverridden = action === 'overridden';
+
+    const updatePayload: Record<string, unknown> = {
+      status: newStatus,
+      reviewed_by: 'operator',   // TODO: 待串接 session 使用者身份
+      reviewed_at: now,
+      // 覆寫相關欄位
+      is_overridden: isOverridden,
+      override_reason: isOverridden ? override_reason.trim() : null,
+      overridden_by: isOverridden ? 'operator' : null,   // 同上，待串接身份
+      overridden_at: isOverridden ? now : null,
+    };
+
     const { data, error } = await supabase
       .from('allocation_recommendations')
-      .update({
-        review_action: action,
-        override_reason: override_reason ?? null,
-        reviewed_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', recId)
       .select()
       .single();
@@ -43,6 +63,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error('Review error:', error);
-    return res.status(500).json({ error: 'Internal server error', details: error instanceof Error ? error.message : String(error) });
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 }

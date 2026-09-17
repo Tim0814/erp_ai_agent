@@ -24,9 +24,15 @@ export const OverrideModal: React.FC<OverrideModalProps> = ({ rec, onClose, onSu
   return (
     <div className="modal-backdrop">
       <div className="modal-box">
-        <h3 className="modal-title">✏️ 人工覆寫分配建議 - 訂單 {rec.order_id}</h3>
+        <h3 className="modal-title">
+          ✏️ 人工覆寫分配建議 - {rec.sales_order}
+          <span style={{ marginLeft: '0.4rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+            #{rec.item_code}
+          </span>
+        </h3>
         <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '1rem' }}>
-          原系統建議批次：<strong>{rec.batch_id || '無'}</strong> (加權總分: {rec.total_score.toFixed(1)})
+          原系統建議批次：<strong>{rec.batch_id || '無'}</strong>
+          {' '}(加權總分: {Number(rec.score).toFixed(1)})
         </p>
 
         <form onSubmit={handleSubmit}>

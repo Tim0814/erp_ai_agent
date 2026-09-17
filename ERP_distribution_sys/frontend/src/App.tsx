@@ -59,7 +59,7 @@ export const App: React.FC = () => {
       const data = await res.json();
       if (data.success) {
         setRecommendations((prev) =>
-          prev.map((r) => (r.id === recId || r.order_id === recId ? data.data : r))
+          prev.map((r) => (r.id === recId ? data.data : r))
         );
       }
     } catch (err) {
@@ -75,9 +75,9 @@ export const App: React.FC = () => {
     fetchRecommendations();
   }, []);
 
-  // 分區過濾
-  const autoConfirmList = recommendations.filter((r) => r.status !== 'blocked' && r.total_score >= 80);
-  const manualReviewList = recommendations.filter((r) => r.status === 'blocked' || r.total_score < 80);
+  // 分區過濾（依燈號分類，與審核流程 status 無關）
+  const autoConfirmList = recommendations.filter((r) => r.traffic_light === 'green');
+  const manualReviewList = recommendations.filter((r) => r.traffic_light === 'yellow' || r.traffic_light === 'red');
 
   return (
     <div className="dashboard-container">
@@ -104,7 +104,7 @@ export const App: React.FC = () => {
       <section className="zone-section">
         <div className="zone-title" style={{ color: '#10b981' }}>
           <CheckCircle size={22} />
-          <span>區域一：可直接確認 (總分 ≥ 80)</span>
+          <span>區域一：可直接確認（綠燈）</span>
           <span className="zone-badge-count" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981' }}>
             {autoConfirmList.length} 筆
           </span>
@@ -115,7 +115,7 @@ export const App: React.FC = () => {
           <div className="cards-grid">
             {autoConfirmList.map((rec) => (
               <RecommendationCard
-                key={rec.order_id}
+                key={rec.id}
                 rec={rec}
                 onApprove={(id) => handleReviewAction(id, 'approved')}
                 onOverride={(r) => setOverrideModalRec(r)}
@@ -130,7 +130,7 @@ export const App: React.FC = () => {
       <section className="zone-section">
         <div className="zone-title" style={{ color: '#f59e0b' }}>
           <AlertOctagon size={22} />
-          <span>區域二：需人工處理 / 建議複核 (阻斷或總分 &lt; 80)</span>
+          <span>區域二：需人工處理 / 建議複核（黃燈 / 紅燈）</span>
           <span className="zone-badge-count" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b' }}>
             {manualReviewList.length} 筆
           </span>
@@ -141,7 +141,7 @@ export const App: React.FC = () => {
           <div className="cards-grid">
             {manualReviewList.map((rec) => (
               <RecommendationCard
-                key={rec.order_id}
+                key={rec.id}
                 rec={rec}
                 onApprove={(id) => handleReviewAction(id, 'approved')}
                 onOverride={(r) => setOverrideModalRec(r)}
