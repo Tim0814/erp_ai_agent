@@ -16,7 +16,7 @@ import { AllocationInput, AllocationResult, Batch, BatchScore, ScoreBreakdown, S
 import { validateWeights } from './weights.js';
 import { applyHardConstraints } from './hardConstraints.js';
 import { rankBatches } from './scoring.js';
-import { LlmExplainer, buildPrompt, StubExplainer } from './llm.js';
+import { LlmExplainer, buildPrompt, StubExplainer, SkippedCandidateContext } from './llm.js';
 
 // ─── 引擎選項 ──────────────────────────────────────────────────────────────────
 
@@ -289,8 +289,17 @@ export async function runAllocation(
       pendingOrderRegions,
     );
 
-    // 5c. 選最高分批次，記錄扣減前庫存量
-    const best = ranked[0]!;
+    // 5c. 優先選出第一個不會觸發紅燈的候選批次；
+    //     若所有候選均會觸發紅燈則 fallback 回最高分（ranked[0]）
+    const { picked, skippedCandidate } = pickBestNonRed(
+      ranked,
+      workingBatches,
+      order,
+      today,
+      existingAllocatedBatchIds,
+      allocatedThisRun,
+    );
+    const best = picked;
     const chosenBatch = workingBatches.find((b) => b.batchId === best.batchId)!;
     const originalAvailableQty = chosenBatch.availableQty; // 扣減前保留，供燈號判斷使用
 
@@ -354,7 +363,8 @@ export async function runAllocation(
       signalColor: signal.color,
       signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
     };
-    result.explanation = await explainer.explain(buildPrompt(result));
+    // 若有被跳過的高分批次，將其 context 傳入 buildPrompt 供 LLM 自然帶入說明
+    result.explanation = await explainer.explain(buildPrompt(result, skippedCandidate ?? undefined));
     resultMap.set(order.orderId, result);
   }
 
@@ -372,4 +382,78 @@ function zeroScores(): ScoreBreakdown {
     customerTier: 0,
     regionCluster: 0,
   };
+}
+
+// ─── 選批輔助：優先跳過會觸發紅燈的候選 ──────────────────────────────────────
+
+/**
+ * 從已排序的候選清單（高分 → 低分）中，選出第一個預判不會觸發紅燈的批次。
+ *
+ * 預判邏輯：對每個候選呼叫 computeSignal()（不扣減庫存）。
+ * - 若找到 signal.color !== 'red' 的候選 → 以該批次為 picked；
+ *   若它不是 ranked[0]，則記錄 ranked[0] 為 skippedCandidate 供 LLM context 使用。
+ * - 若所有候選預判均為 red → fallback 回 ranked[0]（原本行為），skippedCandidate 為 null。
+ *
+ * @param ranked                  已依加權分數由高到低排序的候選批次
+ * @param workingBatches          即時庫存工作副本（唯讀，此函式不修改）
+ * @param order                   當前訂單（用於 computeSignal 的條件判斷）
+ * @param today                   基準日期
+ * @param existingAllocatedBatchIds DB 中已存在未取消分配的 batchId 集合（Red-3）
+ * @param allocatedThisRun        本次執行已分配的 batchId 集合（Red-4）
+ */
+function pickBestNonRed(
+  ranked: BatchScore[],
+  workingBatches: Batch[],
+  order: { requestedQty: number; requestedDate: Date },
+  today: Date,
+  existingAllocatedBatchIds: Set<string>,
+  allocatedThisRun: Set<string>,
+): { picked: BatchScore; skippedCandidate: SkippedCandidateContext | null } {
+  const highestRanked = ranked[0]!;
+
+  for (const candidate of ranked) {
+    const batch = workingBatches.find((b) => b.batchId === candidate.batchId)!;
+    const originalQty = batch.availableQty; // 預判不扣減，直接讀現值
+
+    const signal = computeSignal(
+      order,
+      batch,
+      originalQty,
+      candidate.totalScore,
+      today,
+      existingAllocatedBatchIds,
+      allocatedThisRun,
+    );
+
+    if (signal.color !== 'red') {
+      // 找到可用的非紅燈批次
+      const wasSkipped = candidate.batchId !== highestRanked.batchId;
+      return {
+        picked: candidate,
+        skippedCandidate: wasSkipped
+          ? {
+              batchId: highestRanked.batchId,
+              totalScore: highestRanked.totalScore,
+              // 記錄最高分批次被跳過的原因（重新對它做一次預判取得原因）
+              redReason: (() => {
+                const topBatch = workingBatches.find((b) => b.batchId === highestRanked.batchId)!;
+                const topSignal = computeSignal(
+                  order,
+                  topBatch,
+                  topBatch.availableQty,
+                  highestRanked.totalScore,
+                  today,
+                  existingAllocatedBatchIds,
+                  allocatedThisRun,
+                );
+                return topSignal.reason;
+              })(),
+            }
+          : null,
+      };
+    }
+  }
+
+  // 所有候選均為紅燈 → fallback：選分數最高的，維持原本行為
+  return { picked: highestRanked, skippedCandidate: null };
 }

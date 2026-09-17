@@ -27,10 +27,29 @@ export interface LlmExplainer {
 // ─── Prompt 組裝 ───────────────────────────────────────────────────────────────
 
 /**
+ * 當引擎跳過分數較高但會觸發紅燈的批次、改選較低分批次時，
+ * 傳入此結構讓 LLM 在生成 rationale 時能自然帶入跳過決策的背景。
+ * signalReason 只描述最終選中批次自己的燈號原因，
+ * 被跳過批次的資訊僅透過這個 context 物件傳遞。
+ */
+export interface SkippedCandidateContext {
+  /** 被跳過的高分批次 ID */
+  batchId: string;
+  /** 被跳過批次的加權總分 */
+  totalScore: number;
+  /** 預判觸發紅燈的原因（來自 computeSignal 的 signal.reason） */
+  redReason: string;
+}
+
+/**
  * 將規則引擎的計算結果組成 prompt
  * LLM 只看到數字與結論，不會接觸到原始批次或訂單資料
+ *
+ * @param result           引擎產出的分配結果
+ * @param skippedCandidate 若引擎跳過了分數更高的批次，傳入此 context 讓 LLM 知情；
+ *                         一般情境（未跳過）省略此參數
  */
-export function buildPrompt(result: AllocationResult): string {
+export function buildPrompt(result: AllocationResult, skippedCandidate?: SkippedCandidateContext): string {
   if (result.status === 'blocked') {
     return (
       `你是食品供應鏈 ERP 系統的助理。請用繁體中文，以一句清楚簡短的話，` +
@@ -45,6 +64,17 @@ export function buildPrompt(result: AllocationResult): string {
   const scoreLines = formatScores(scores);
   const statusLabel = status === 'partial' ? '部分分配' : '建議分配';
 
+  // 若有被跳過的高分批次，附上結構化背景資訊供 LLM 參考
+  const skippedSection = skippedCandidate
+    ? (
+      `\n補充背景（請自然融入說明，勿逐字照抄）：\n` +
+      `  原始最高分批次：${skippedCandidate.batchId}` +
+      `（總分 ${skippedCandidate.totalScore.toFixed(2)}）\n` +
+      `  跳過原因：${skippedCandidate.redReason}\n` +
+      `  系統因此改選上方建議批次以避免風險。\n`
+    )
+    : '';
+
   return (
     `你是食品供應鏈 ERP 系統的助理。請用繁體中文，以一句清楚簡短的話，` +
     `解釋以下訂單分配結果的主要原因（不要重複列出所有數字，` +
@@ -53,8 +83,9 @@ export function buildPrompt(result: AllocationResult): string {
     `分配狀態：${statusLabel}\n` +
     `建議批次：${recommendedBatchId}\n` +
     `加權總分：${totalScore.toFixed(2)}\n` +
-    `各分項分數（0~100）：\n${scoreLines}\n\n` +
-    `請直接輸出說明文字，不要加任何前綴或標題。`
+    `各分項分數（0~100）：\n${scoreLines}\n` +
+    skippedSection +
+    `\n請直接輸出說明文字，不要加任何前綴或標題。`
   );
 }
 
@@ -144,18 +175,23 @@ export class OpenAiExplainer implements LlmExplainer {
 export class StubExplainer implements LlmExplainer {
   async explain(prompt: string): Promise<string> {
     // 從 prompt 中擷取關鍵資訊，組成假解釋
-    const orderMatch = prompt.match(/訂單編號：(\S+)/);
-    const batchMatch = prompt.match(/建議批次：(\S+)/);
-    const scoreMatch = prompt.match(/加權總分：([\d.]+)/);
+    const orderMatch   = prompt.match(/訂單編號：(\S+)/);
+    const batchMatch   = prompt.match(/建議批次：(\S+)/);
+    const scoreMatch   = prompt.match(/加權總分：([\d.]+)/);
     const blockedMatch = prompt.match(/阻斷原因：(.+)/);
+    const skippedMatch = prompt.match(/原始最高分批次：(\S+?)（/);
 
     if (blockedMatch) {
       return `[Stub] 訂單 ${orderMatch?.[1] ?? '?'} 因「${blockedMatch[1]}」無法自動分配，請人工處理。`;
     }
 
+    const skippedNote = skippedMatch
+      ? `（原高分批次 ${skippedMatch[1]} 因衝突略過）`
+      : '';
+
     return (
       `[Stub] 訂單 ${orderMatch?.[1] ?? '?'} 建議分配批次 ` +
-      `${batchMatch?.[1] ?? '?'}，加權總分 ${scoreMatch?.[1] ?? '?'}。`
+      `${batchMatch?.[1] ?? '?'}，加權總分 ${scoreMatch?.[1] ?? '?'}。${skippedNote}`
     );
   }
 }
