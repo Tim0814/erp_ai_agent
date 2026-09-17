@@ -91,6 +91,37 @@ export async function fetchOrders(): Promise<Order[]> {
   return normalizeMockOrders();
 }
 
+/**
+ * 讀取指定商品、且父訂單仍為 Draft 的訂單明細。
+ * 局部重新分配僅應處理這些仍可分配的需求，不能把已取消或完成的訂單帶回引擎。
+ */
+export async function fetchDraftOrdersByItemCode(itemCode: string): Promise<Order[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error('Supabase not configured');
+  }
+
+  const { data, error } = await supabase
+    .from('sales_order_items')
+    .select('name, parent, qty, delivery_date, item_code, sales_orders!parent!inner(name, customer_name, delivery_date, created_at, status)')
+    .eq('item_code', itemCode)
+    .eq('sales_orders.status', 'Draft');
+
+  if (error) {
+    throw new Error(`Failed to fetch draft orders: ${error.message}`);
+  }
+
+  return (data ?? []).map((row: any) => ({
+    orderId: String(row.name ?? row.id ?? ''),
+    parentOrderId: String(row.sales_orders?.name ?? row.parent ?? ''),
+    customerId: String(row.sales_orders?.customer_name ?? ''),
+    itemCode: String(row.item_code ?? ''),
+    requestedQty: Number(row.qty ?? 0),
+    requestedDate: toDate(row.delivery_date ?? row.sales_orders?.delivery_date),
+    createdAt: toDate(row.sales_orders?.created_at),
+  }));
+}
+
 export async function fetchCustomers(): Promise<Customer[]> {
   const supabase = getSupabaseClient();
 
