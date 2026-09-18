@@ -49,9 +49,9 @@ export class GeminiExplainer implements LlmExplainer {
           generationConfig: {
             temperature: 0.2,
             maxOutputTokens: 1000,
-            // thinkingConfig: {
-            //   thinkingLevel: "low",
-            // },
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         }),
       });
