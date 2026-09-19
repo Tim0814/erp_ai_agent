@@ -1,0 +1,21 @@
+{
+  "name": "erpnext-supabase-sync",
+  "version": "1.0.0",
+  "description": "本機執行：從 ERPNext 讀取資料並同步寫入 Supabase（不部署到 Vercel）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "node --loader ts-node/esm syncFromErpnext.ts",
+    "build": "tsc",
+    "sync:compiled": "node dist/syncFromErpnext.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}
