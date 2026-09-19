@@ -75,7 +75,6 @@ async function erpFetchAll(
 
   while (true) {
     const params = new URLSearchParams({
-      doctype,
       fields: JSON.stringify(fields),
       filters: JSON.stringify(filters),
       limit_start: String(start),
@@ -123,7 +122,6 @@ async function erpFetchChildAll(
 
   while (true) {
     const params = new URLSearchParams({
-      doctype: childDoctype,
       fields: JSON.stringify(fields),
       filters: JSON.stringify([[childDoctype, parentField, 'in', parentValues]]),
       limit_start: String(start),
