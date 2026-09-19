@@ -182,7 +182,7 @@ interface ErpCustomer {
 
 async function fetchErpCustomers(): Promise<ErpCustomer[]> {
   const rows = await erpFetchAll('Customer', [
-    'name', 'customer_group', 'customer_type', 'territory', 'custom_customer_tier',
+    'name', 'customer_group', 'customer_type', 'territory', 
   ]);
   return rows.map((r) => ({
     name:           String(r['name']           ?? ''),
