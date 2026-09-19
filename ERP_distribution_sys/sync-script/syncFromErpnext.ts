@@ -223,20 +223,70 @@ interface ErpBin {
   actual_qty: number;
 }
 
+/**
+ * 從 Stock Ledger Entry（庫存分類帳）讀取批次級庫存。
+ *
+ * Stock Ledger Entry 是異動流水帳，同一個 item_code + batch_no + warehouse
+ * 組合可能有多筆記錄（進貨、出貨各一筆）。
+ *
+ * 分組去重邏輯（在 JS 層處理）：
+ *   1. 以 `${item_code}|${batch_no}|${warehouse}` 為 Map key
+ *   2. 遍歷所有 SLE 記錄，比較 posting_date + posting_time 組合字串
+ *      （格式 "YYYY-MM-DD HH:mm:ss"，字典序比較即可等效時間排序）
+ *   3. 每個 key 只保留時間戳最新的那筆，取其 qty_after_transaction 作為當前庫存
+ *
+ * 篩選條件：
+ *   - batch_no 不為空（排除無批次追蹤的異動）
+ *   - is_cancelled = 0（排除已作廢記錄）
+ *   - qty_after_transaction > 0（最終只輸出有庫存的批次）
+ */
 async function fetchErpInventory(): Promise<ErpBin[]> {
-  // Bin 是 ERPNext 的即時庫存表，每個 item_code + warehouse + batch_no 一筆
-  const rows = await erpFetchAll('Bin', [
-    'item_code', 'batch_no', 'warehouse', 'actual_qty',
-  ], [['Bin', 'actual_qty', '>', 0]]);
+  const rows = await erpFetchAll(
+    'Stock Ledger Entry',
+    ['item_code', 'batch_no', 'warehouse', 'qty_after_transaction', 'posting_date', 'posting_time'],
+    [
+      ['Stock Ledger Entry', 'batch_no', '!=', ''],
+      ['Stock Ledger Entry', 'is_cancelled', '=', 0],
+    ],
+  );
 
-  return rows
-    .filter((r) => r['batch_no'] != null && String(r['batch_no']).trim() !== '')
-    .map((r) => ({
-      item_code:  String(r['item_code']  ?? ''),
-      batch_no:   String(r['batch_no']   ?? ''),
-      warehouse:  String(r['warehouse']  ?? ''),
-      actual_qty: Number(r['actual_qty'] ?? 0),
-    }));
+  // ── 分組去重：key = item_code|batch_no|warehouse，保留最新一筆 ────────────
+  // Map value：{ qty: number, timestamp: string }
+  // timestamp 格式："YYYY-MM-DD HH:mm:ss"，字典序比較即等效時間先後
+  const latest = new Map<string, { qty: number; timestamp: string }>();
+
+  for (const r of rows) {
+    const itemCode  = String(r['item_code']  ?? '').trim();
+    const batchNo   = String(r['batch_no']   ?? '').trim();
+    const warehouse = String(r['warehouse']  ?? '').trim();
+
+    // 過濾空值（batch_no filter 有時 ERPNext 仍會回傳空字串）
+    if (!itemCode || !batchNo || !warehouse) continue;
+
+    const key = `${itemCode}|${batchNo}|${warehouse}`;
+
+    // 組合時間戳字串，補空白確保格式固定（字典序 = 時間序）
+    const postingDate = String(r['posting_date'] ?? '1970-01-01');
+    const postingTime = String(r['posting_time'] ?? '00:00:00');
+    const timestamp   = `${postingDate} ${postingTime}`;
+
+    const qty = Number(r['qty_after_transaction'] ?? 0);
+
+    const current = latest.get(key);
+    if (!current || timestamp > current.timestamp) {
+      latest.set(key, { qty, timestamp });
+    }
+  }
+
+  // ── 輸出：只保留 qty_after_transaction > 0 的批次 ─────────────────────────
+  const result: ErpBin[] = [];
+  for (const [key, { qty }] of latest) {
+    if (qty <= 0) continue;
+    const [item_code, batch_no, warehouse] = key.split('|') as [string, string, string];
+    result.push({ item_code, batch_no, warehouse, actual_qty: qty });
+  }
+
+  return result;
 }
 
 interface ErpSalesOrder {
@@ -458,9 +508,9 @@ async function main(): Promise<void> {
   const erpBatches = await fetchErpBatches();
   console.log(`    → ${erpBatches.length} 筆批次`);
 
-  console.log('  ▸ 讀取 Bin（庫存）...');
+  console.log('  ▸ 讀取 Stock Ledger Entry（批次級庫存）...');
   const erpBins = await fetchErpInventory();
-  console.log(`    → ${erpBins.length} 筆庫存記錄（已過濾 actual_qty = 0）`);
+  console.log(`    → ${erpBins.length} 筆庫存記錄（分組去重後 qty > 0 的批次）`);
 
   console.log('  ▸ 讀取 Sales Order...');
   const erpOrders = await fetchErpSalesOrders();
