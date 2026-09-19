@@ -224,61 +224,91 @@ interface ErpBin {
 }
 
 /**
- * 從 Stock Ledger Entry（庫存分類帳）讀取批次級庫存。
+ * 從 Serial and Batch Bundle 讀取批次級庫存（方案 B）。
  *
- * Stock Ledger Entry 是異動流水帳，同一個 item_code + batch_no + warehouse
- * 組合可能有多筆記錄（進貨、出貨各一筆）。
+ * 資料路徑：
+ *   Serial and Batch Bundle（父文件，含 item_code / warehouse）
+ *     └─ entries[]（Serial and Batch Entry 子表，含 batch_no / qty / posting_datetime）
+ *
+ * 為什麼不走 Stock Ledger Entry？
+ *   SLE.batch_no 在新版 ERPNext「Serial and Batch Bundle」機制下不會被回填，
+ *   維持 null；批次與數量的對應關係改存在 Bundle 文件裡。
+ *   此外，Serial and Batch Entry 子表無法透過 /api/resource 直接查詢，
+ *   只能透過讀取各個 Bundle 父文件的 entries 欄位取得。
+ *
+ * ⚠️  目前假設全部都是 Inward（進貨）交易，filter 設定為 type_of_transaction = 'Inward'。
+ *   未來如果加入出貨（Outward）異動，qty 會變成負數、當前庫存需要改用
+ *   「同 item+batch+warehouse 的所有 Inward qty 總和 − Outward qty 總和」計算，
+ *   或改讀 SLE.qty_after_transaction（屆時批次回填問題可能已解決）。
+ *   在此之前，請勿把 Outward Bundle 納入計算，否則會低估庫存。
  *
  * 分組去重邏輯（在 JS 層處理）：
- *   1. 以 `${item_code}|${batch_no}|${warehouse}` 為 Map key
- *   2. 遍歷所有 SLE 記錄，比較 posting_date + posting_time 組合字串
- *      （格式 "YYYY-MM-DD HH:mm:ss"，字典序比較即可等效時間排序）
- *   3. 每個 key 只保留時間戳最新的那筆，取其 qty_after_transaction 作為當前庫存
- *
- * 篩選條件：
- *   - batch_no 不為空（排除無批次追蹤的異動）
- *   - is_cancelled = 0（排除已作廢記錄）
- *   - qty_after_transaction > 0（最終只輸出有庫存的批次）
+ *   - key = `item_code|batch_no|warehouse`
+ *   - 以 entries[].posting_datetime（ISO 字串，字典序 = 時間序）保留最新一筆
+ *   - 最終排除 qty ≤ 0 的批次（BAT-104 零庫存批次在此被濾掉）
  */
 async function fetchErpInventory(): Promise<ErpBin[]> {
-  const rows = await erpFetchAll(
-    'Stock Ledger Entry',
-    ['item_code', 'batch_no', 'warehouse', 'qty_after_transaction', 'posting_date', 'posting_time'],
+  // ── Step A：取得所有未取消、Inward 的 Bundle 清單 ────────────────────────────
+  const bundleList = await erpFetchAll(
+    'Serial and Batch Bundle',
+    ['name', 'item_code', 'warehouse', 'is_cancelled', 'type_of_transaction'],
     [
-      ['Stock Ledger Entry', 'batch_no', '!=', ''],
-      ['Stock Ledger Entry', 'is_cancelled', '=', 0],
+      ['Serial and Batch Bundle', 'is_cancelled', '=', 0],
+      // ⚠️  目前只處理進貨（Inward）；若未來有出貨異動，需重新設計（見 JSDoc 說明）
+      ['Serial and Batch Bundle', 'type_of_transaction', '=', 'Inward'],
     ],
   );
 
-  // ── 分組去重：key = item_code|batch_no|warehouse，保留最新一筆 ────────────
-  // Map value：{ qty: number, timestamp: string }
-  // timestamp 格式："YYYY-MM-DD HH:mm:ss"，字典序比較即等效時間先後
+  if (bundleList.length === 0) {
+    console.log('    （Serial and Batch Bundle 查詢結果為 0 筆，請確認 ERPNext 已提交 Stock Entry）');
+    return [];
+  }
+
+  // ── Step B：逐一讀取每個 Bundle 的完整文件（含 entries 子表）────────────────
+  // ERPNext 的 Serial and Batch Entry 子表無法透過 resource API 直接批次查詢，
+  // 只能透過 GET /api/resource/Serial and Batch Bundle/{id} 取得父文件再讀 entries。
   const latest = new Map<string, { qty: number; timestamp: string }>();
 
-  for (const r of rows) {
-    const itemCode  = String(r['item_code']  ?? '').trim();
-    const batchNo   = String(r['batch_no']   ?? '').trim();
-    const warehouse = String(r['warehouse']  ?? '').trim();
+  for (const bundle of bundleList) {
+    const bundleId = String(bundle['name'] ?? '');
+    const parentItemCode  = String(bundle['item_code']  ?? '').trim();
+    const parentWarehouse = String(bundle['warehouse']  ?? '').trim();
 
-    // 過濾空值（batch_no filter 有時 ERPNext 仍會回傳空字串）
-    if (!itemCode || !batchNo || !warehouse) continue;
+    if (!bundleId || !parentItemCode || !parentWarehouse) continue;
 
-    const key = `${itemCode}|${batchNo}|${warehouse}`;
+    // 讀取完整 Bundle 文件（entries 子表只在 single-doc GET 裡有完整資料）
+    const url = `${ERPNEXT_BASE_URL}/api/resource/${encodeURIComponent('Serial and Batch Bundle')}/${encodeURIComponent(bundleId)}`;
+    const resp = await fetch(url, { headers: { Authorization: AUTH_HEADER } });
 
-    // 組合時間戳字串，補空白確保格式固定（字典序 = 時間序）
-    const postingDate = String(r['posting_date'] ?? '1970-01-01');
-    const postingTime = String(r['posting_time'] ?? '00:00:00');
-    const timestamp   = `${postingDate} ${postingTime}`;
+    if (!resp.ok) {
+      console.warn(`    ⚠️  讀取 Bundle ${bundleId} 失敗（HTTP ${resp.status}），略過`);
+      continue;
+    }
 
-    const qty = Number(r['qty_after_transaction'] ?? 0);
+    const doc = (await resp.json() as { data?: { entries?: Record<string, unknown>[] } }).data;
+    const entries = doc?.entries ?? [];
 
-    const current = latest.get(key);
-    if (!current || timestamp > current.timestamp) {
-      latest.set(key, { qty, timestamp });
+    for (const entry of entries) {
+      const batchNo   = String(entry['batch_no']   ?? '').trim();
+      const qty       = Number(entry['qty']         ?? 0);
+      // posting_datetime 格式："YYYY-MM-DD HH:MM:SS.ffffff"，字典序 = 時間序
+      const timestamp = String(entry['posting_datetime'] ?? '1970-01-01 00:00:00');
+
+      // item_code / warehouse 以子表欄位優先，fallback 到父文件
+      const itemCode  = String(entry['item_code']  ?? parentItemCode).trim()  || parentItemCode;
+      const warehouse = String(entry['warehouse']  ?? parentWarehouse).trim() || parentWarehouse;
+
+      if (!batchNo || !itemCode || !warehouse) continue;
+
+      const key = `${itemCode}|${batchNo}|${warehouse}`;
+      const current = latest.get(key);
+      if (!current || timestamp > current.timestamp) {
+        latest.set(key, { qty, timestamp });
+      }
     }
   }
 
-  // ── 輸出：只保留 qty_after_transaction > 0 的批次 ─────────────────────────
+  // ── Step C：組裝輸出，排除 qty ≤ 0 ──────────────────────────────────────────
   const result: ErpBin[] = [];
   for (const [key, { qty }] of latest) {
     if (qty <= 0) continue;
@@ -343,34 +373,53 @@ async function fetchErpSalesOrderItems(orderNames: string[]): Promise<ErpSalesOr
 // ─── Supabase 清空與寫入函式 ───────────────────────────────────────────────────
 
 /**
- * 按照外鍵依賴順序清空六張表（子表先清，父表後清）
- * 不動 company_weights 與 allocation_recommendations
+ * 各表對應的主鍵欄位名稱。
+ * 用明確對照表取代「先猜 id、失敗退回 created_at」的通用策略，
+ * 因為本專案 8 張表的主鍵欄位名稱並不統一（有 id、name、batch_id 等）。
+ */
+const TABLE_PRIMARY_KEYS: Record<string, string> = {
+  allocation_recommendations: 'id',
+  sales_order_items:          'name',
+  inventory:                  'id',
+  sales_orders:               'name',
+  batches:                    'batch_id',
+  items:                      'item_code',
+  customers:                  'customer_name',
+};
+
+/**
+ * 按照外鍵依賴順序清空七張表（子表先清，父表後清）。
+ * 不動 company_weights。
+ *
+ * 刪除條件：.not(pkColumn, 'is', null)
+ *   主鍵欄位保證不為 null，這個條件對 TEXT 與 BIGSERIAL 都通用，
+ *   等效於「刪除全部資料列」，不需要依型別分支。
+ *
+ * 清空任一張表失敗時立即拋錯並中斷，避免「清空失敗卻繼續寫入」
+ * 造成後續主鍵衝突（duplicate key）等更難排查的錯誤。
  */
 async function clearTables(supabase: SupabaseClient): Promise<void> {
-  // 清空順序：子表 → 父表，避免外鍵約束報錯
+  // 清空順序：子表 → 父表（已驗證符合外鍵依賴關係）
   const tables = [
-    'allocation_recommendations', // 依賴 sales_order_items → 先清（只清外鍵影響到的部分，但為求乾淨全清）
+    'allocation_recommendations', // 外鍵參照 sales_order_items，必須最先清
     'sales_order_items',
-    'sales_orders',
     'inventory',
+    'sales_orders',
     'batches',
     'items',
     'customers',
   ] as const;
 
-  // allocation_recommendations 跟 ERPNext 無關，但它外鍵參照 sales_order_items，
-  // 清空 sales_order_items 前必須先清它，否則外鍵約束會阻擋。
-  // 這裡全部清空；如果你想保留已審核的紀錄，在執行前手動備份 allocation_recommendations。
   for (const table of tables) {
-    const { error } = await supabase.from(table).delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    // neq('id', ...) 是繞過 Supabase 要求 filter 的方式，實際效果等同 DELETE FROM table
+    const pkColumn = TABLE_PRIMARY_KEYS[table];
+    if (!pkColumn) throw new Error(`clearTables：找不到 ${table} 的主鍵欄位定義`);
+
+    const { error } = await supabase.from(table).delete().not(pkColumn, 'is', null);
     if (error) {
-      // 部分表可能沒有 id 欄位（如 sales_order_items 用 name），改用 truthy filter
-      const { error: error2 } = await supabase.from(table).delete().gte('created_at', '1970-01-01');
-      if (error2) {
-        console.warn(`  ⚠️  清空 ${table} 失敗（${error2.message}），繼續執行...`);
-      }
+      // 清空失敗立即中斷，不吞錯誤，讓呼叫端看到真正的原因
+      throw new Error(`清空 ${table}（主鍵：${pkColumn}）失敗：${error.message}`);
     }
+    console.log(`    ✓ ${table}`);
   }
 }
 
@@ -508,9 +557,9 @@ async function main(): Promise<void> {
   const erpBatches = await fetchErpBatches();
   console.log(`    → ${erpBatches.length} 筆批次`);
 
-  console.log('  ▸ 讀取 Stock Ledger Entry（批次級庫存）...');
+  console.log('  ▸ 讀取 Serial and Batch Bundle（批次級庫存）...');
   const erpBins = await fetchErpInventory();
-  console.log(`    → ${erpBins.length} 筆庫存記錄（分組去重後 qty > 0 的批次）`);
+  console.log(`    → ${erpBins.length} 筆庫存記錄（Inward Bundle 分組去重後 qty > 0 的批次）`);
 
   console.log('  ▸ 讀取 Sales Order...');
   const erpOrders = await fetchErpSalesOrders();
@@ -525,11 +574,11 @@ async function main(): Promise<void> {
   }
 
   console.log('\n【Step 2】清空 Supabase 目標表...\n');
-  console.log('  ⚠️  將清空：allocation_recommendations、sales_order_items、sales_orders、');
-  console.log('           inventory、batches、items、customers');
+  console.log('  ⚠️  將清空：allocation_recommendations、sales_order_items、inventory、');
+  console.log('           sales_orders、batches、items、customers');
   console.log('  ✓  保留：company_weights（不動）\n');
   await clearTables(supabase);
-  console.log('  清空完成。');
+  console.log('\n  清空完成。');
 
   // ── Step 3：寫入 Supabase（父表先寫，子表後寫）──────────────────────────────
   console.log('\n【Step 3】寫入 Supabase...\n');
