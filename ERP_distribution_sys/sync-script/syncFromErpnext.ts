@@ -57,6 +57,17 @@ const DEFAULT_TIER = 'standard';
 const AUTH_HEADER = `token ${ERPNEXT_API_KEY}:${ERPNEXT_API_SECRET}`;
 
 /**
+ * 去除 ERPNext 自動附加的公司簡稱後綴（例如 "NORTH - ECV" → "NORTH"）。
+ * ERPNext 的倉庫命名規則是「<名稱> - <公司簡稱>」，取最後一個
+ * " - " 之前的部分。
+ * 若倉庫名稱不含 " - "，原樣回傳（相容於手動建立的無後綴倉庫名稱）。
+ */
+function stripWarehouseSuffix(warehouseName: string): string {
+  const idx = warehouseName.lastIndexOf(' - ');
+  return idx === -1 ? warehouseName : warehouseName.slice(0, idx);
+}
+
+/**
  * 呼叫 ERPNext REST API，取得指定 DocType 的全部資料。
  * ERPNext 預設一次最多回傳 20 筆，這裡用 limit_page_length=500 + 分頁迴圈確保全量抓取。
  *
@@ -272,7 +283,7 @@ async function fetchErpInventory(): Promise<ErpBin[]> {
   for (const bundle of bundleList) {
     const bundleId = String(bundle['name'] ?? '');
     const parentItemCode  = String(bundle['item_code']  ?? '').trim();
-    const parentWarehouse = String(bundle['warehouse']  ?? '').trim();
+    const parentWarehouse = stripWarehouseSuffix(String(bundle['warehouse'] ?? '').trim());
 
     if (!bundleId || !parentItemCode || !parentWarehouse) continue;
 
@@ -295,8 +306,12 @@ async function fetchErpInventory(): Promise<ErpBin[]> {
       const timestamp = String(entry['posting_datetime'] ?? '1970-01-01 00:00:00');
 
       // item_code / warehouse 以子表欄位優先，fallback 到父文件
+      // warehouse 套用 stripWarehouseSuffix() 移除 ERPNext 自動附加的公司後綴（如 " - ECV"），
+      // 確保與 customers.territory 的字串完全吻合，區域群聚評分才能正確計算。
       const itemCode  = String(entry['item_code']  ?? parentItemCode).trim()  || parentItemCode;
-      const warehouse = String(entry['warehouse']  ?? parentWarehouse).trim() || parentWarehouse;
+      const warehouse = stripWarehouseSuffix(
+        String(entry['warehouse']  ?? parentWarehouse).trim() || parentWarehouse
+      );
 
       if (!batchNo || !itemCode || !warehouse) continue;
 
@@ -332,7 +347,7 @@ async function fetchErpSalesOrders(): Promise<ErpSalesOrder[]> {
   // 只同步尚未完成或取消的訂單（Draft / To Deliver and Bill / To Bill）
   const rows = await erpFetchAll('Sales Order', [
     'name', 'customer', 'transaction_date', 'delivery_date', 'status', 'grand_total',
-  ], [['Sales Order', 'docstatus', '=', 1]]); // docstatus=1 代表 Submitted
+  ], [['Sales Order', 'docstatus', '=', 0]]); // docstatus=0 代表 Draft（草稿），AI 介入評估的時間點
 
   return rows.map((r) => ({
     name:             String(r['name']             ?? ''),
