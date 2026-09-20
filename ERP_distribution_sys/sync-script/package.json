@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "sync": "node --loader ts-node/esm syncFromErpnext.ts",
+    "sync": "node --use-system-ca --loader ts-node/esm syncFromErpnext.ts",
     "build": "tsc",
     "sync:compiled": "node dist/syncFromErpnext.js"
   },
