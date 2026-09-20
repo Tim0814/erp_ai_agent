@@ -369,20 +369,38 @@ interface ErpSalesOrderItem {
 }
 
 async function fetchErpSalesOrderItems(orderNames: string[]): Promise<ErpSalesOrderItem[]> {
-  const rows = await erpFetchChildAll(
-    'Sales Order Item',
-    ['name', 'parent', 'item_code', 'qty', 'rate', 'delivery_date'],
-    'parent',
-    orderNames,
-  );
-  return rows.map((r) => ({
-    name:          String(r['name']          ?? ''),
-    parent:        String(r['parent']        ?? ''),
-    item_code:     String(r['item_code']     ?? ''),
-    qty:           Number(r['qty']           ?? 0),
-    rate:          r['rate']          != null ? Number(r['rate']) : undefined,
-    delivery_date: r['delivery_date'] != null ? String(r['delivery_date']) : undefined,
-  }));
+  if (orderNames.length === 0) return [];
+
+  // ERPNext 的子表 DocType（Sales Order Item）不允許直接查詢（403 PermissionError），
+  // 改用逐一讀取父文件 Sales Order 的完整 doc，從 doc.items[] 子表欄位取得明細。
+  // 這與讀取 Serial and Batch Bundle entries 的方式相同。
+  const allItems: ErpSalesOrderItem[] = [];
+
+  for (const orderName of orderNames) {
+    const url = `${ERPNEXT_BASE_URL}/api/resource/${encodeURIComponent('Sales Order')}/${encodeURIComponent(orderName)}`;
+    const resp = await fetch(url, { headers: { Authorization: AUTH_HEADER } });
+
+    if (!resp.ok) {
+      console.warn(`    ⚠️  讀取 Sales Order ${orderName} 失敗（HTTP ${resp.status}），略過`);
+      continue;
+    }
+
+    const doc = (await resp.json() as { data?: Record<string, unknown> }).data;
+    const items = (doc?.['items'] as Record<string, unknown>[] | undefined) ?? [];
+
+    for (const item of items) {
+      allItems.push({
+        name:          '',   // BIGSERIAL，由 DB 自動產生，寫入時不帶
+        parent:        orderName,   // 父訂單 name，直接用已知的 orderName 確保正確
+        item_code:     String(item['item_code']     ?? ''),
+        qty:           Number(item['qty']           ?? 0),
+        rate:          item['rate']          != null ? Number(item['rate']) : undefined,
+        delivery_date: item['delivery_date'] != null ? String(item['delivery_date']) : undefined,
+      });
+    }
+  }
+
+  return allItems;
 }
 
 // ─── Supabase 清空與寫入函式 ───────────────────────────────────────────────────
@@ -531,7 +549,9 @@ async function upsertSalesOrderItems(
     const chunk = items.slice(i, i + BATCH_SIZE);
     const { error } = await supabase.from('sales_order_items').insert(
       chunk.map((item) => ({
-        name:          item.name,
+        // name 欄位是 BIGSERIAL，由資料庫自動遞增，不要手動賦值
+        // ERPNext 原始的雜湊字串 ID（item.name）在此捨棄，
+        // 關聯查詢只需要 parent（→ sales_orders.name）即可
         parent:        item.parent,
         item_code:     item.item_code,
         qty:           item.qty,
