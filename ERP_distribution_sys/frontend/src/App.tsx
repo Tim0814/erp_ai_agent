@@ -32,6 +32,7 @@ export const App: React.FC = () => {
   // 規則啟用狀態（null = 尚未從 API 載入）
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
   const [rulesLoading, setRulesLoading] = useState<boolean>(false);
+  const [settingsChanged, setSettingsChanged] = useState<boolean>(false);
 
   const fetchRecommendations = async () => {
     try {
@@ -63,6 +64,7 @@ export const App: React.FC = () => {
   };
 
   const handleRunAllocation = async () => {
+    setSettingsChanged(false);
     try {
       setLoading(true);
       const res = await fetch('/api/run-allocation', {
@@ -131,6 +133,7 @@ export const App: React.FC = () => {
       if (data.success && data.data) {
         // 以伺服器回傳值為準，確保前後端一致
         setRuleEnabled(data.data as RuleEnabledState);
+        setSettingsChanged(true);
       } else {
         // 寫入失敗，回滾 UI
         setRuleEnabled((prev) => prev ? { ...prev, [field]: !newValue } : prev);
@@ -210,6 +213,11 @@ export const App: React.FC = () => {
               );
             })}
           </div>
+        )}
+        {settingsChanged && (
+          <p style={{ color: '#f59e0b', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>
+            ⚠️ 設定已更新，請按上方「執行分配引擎」以套用新規則到分配建議
+          </p>
         )}
       </section>
 
