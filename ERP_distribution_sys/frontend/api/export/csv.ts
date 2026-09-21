@@ -17,11 +17,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data, error } = await supabase
       .from('allocation_recommendations')
       .select(`
+        sales_order,
         recommended_qty,
         item_code,
         batch_id,
         warehouse,
         score,
+        traffic_light,
+        status,
         reviewed_at,
         sales_orders!sales_order ( customer_name ),
         items!item_code ( item_name )
@@ -36,13 +39,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // CSV 欄位跳脫：雙引號包覆，內部雙引號轉義
     const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
-    const HEADERS = ['客戶名稱', '商品名稱', '商品代碼', '分配數量', '建議批次', '倉庫', '加權總分', '核准時間'];
+    const HEADERS = [
+      '訂單編號',
+      '客戶名稱',
+      '商品名稱',
+      '商品代碼',
+      '建議數量',
+      '建議批次',
+      '倉庫',
+      '加權總分',
+      '燈號',
+      '審核狀態',
+      '核准時間',
+    ];
     const header = HEADERS.map(escape).join(',');
 
     const rows = records.map((r: any) => {
       const customerName = r.sales_orders?.customer_name ?? '';
       const itemName = r.items?.item_name ?? '';
       return [
+        r.sales_order ?? '',
         customerName,
         itemName,
         r.item_code ?? '',
@@ -50,6 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         r.batch_id ?? '',
         r.warehouse ?? '',
         r.score ?? 0,
+        r.traffic_light ?? '',
+        r.status ?? '',
         r.reviewed_at ?? '',
       ].map(escape).join(',');
     });
