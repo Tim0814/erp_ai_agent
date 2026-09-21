@@ -13,28 +13,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 查詢 approved 紀錄，JOIN sales_orders 取客戶名稱、JOIN items 取商品名稱
+    // 不使用 PostgREST 關聯嵌入：稽核表刻意不依賴會隨同步重建的外鍵。
     const { data, error } = await supabase
       .from('allocation_recommendations')
-      .select(`
-        sales_order,
-        recommended_qty,
-        item_code,
-        batch_id,
-        warehouse,
-        score,
-        traffic_light,
-        status,
-        reviewed_at,
-        sales_orders!sales_order ( customer_name ),
-        items!item_code ( item_name )
-      `)
+      .select('sales_order, recommended_qty, item_code, batch_id, warehouse, score, traffic_light, status, reviewed_at')
       .eq('status', 'approved')
       .order('reviewed_at', { ascending: false });
 
     if (error) throw error;
 
     const records = data ?? [];
+    const salesOrderNames = [...new Set(records.map((record: any) => record.sales_order).filter(Boolean))];
+    const itemCodes = [...new Set(records.map((record: any) => record.item_code).filter(Boolean))];
+
+    const [{ data: salesOrders, error: salesOrdersError }, { data: items, error: itemsError }] =
+      await Promise.all([
+        salesOrderNames.length === 0
+          ? Promise.resolve({ data: [], error: null })
+          : supabase.from('sales_orders').select('name, customer_name').in('name', salesOrderNames),
+        itemCodes.length === 0
+          ? Promise.resolve({ data: [], error: null })
+          : supabase.from('items').select('item_code, item_name').in('item_code', itemCodes),
+      ]);
+
+    if (salesOrdersError) throw salesOrdersError;
+    if (itemsError) throw itemsError;
+
+    const customerNames = new Map((salesOrders ?? []).map((order: any) => [order.name, order.customer_name]));
+    const itemNames = new Map((items ?? []).map((item: any) => [item.item_code, item.item_name]));
 
     // CSV 欄位跳脫：雙引號包覆，內部雙引號轉義
     const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -55,8 +61,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const header = HEADERS.map(escape).join(',');
 
     const rows = records.map((r: any) => {
-      const customerName = r.sales_orders?.customer_name ?? '';
-      const itemName = r.items?.item_name ?? '';
+      const customerName = customerNames.get(r.sales_order) ?? '';
+      const itemName = itemNames.get(r.item_code) ?? '';
       return [
         r.sales_order ?? '',
         customerName,

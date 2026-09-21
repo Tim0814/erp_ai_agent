@@ -68,24 +68,41 @@ export async function fetchOrders(): Promise<Order[]> {
   const supabase = getSupabaseClient();
 
   if (supabase) {
-    const { data, error } = await supabase
-      .from('sales_order_items')
-      .select('name, parent, qty, delivery_date, item_code, sales_orders!parent!inner(name, customer_name, delivery_date, created_at, status)')
-      .eq('sales_orders.status', 'Draft');
+    const { data: salesOrders, error: salesOrdersError } = await supabase
+      .from('sales_orders')
+      .select('name, customer_name, delivery_date, created_at')
+      .eq('status', 'Draft');
 
-    if (!error && Array.isArray(data)) {
-      return data.map((row: any) => ({
+    if (!salesOrdersError && Array.isArray(salesOrders)) {
+      const orderNames = salesOrders.map((order: any) => order.name);
+      const { data: items, error: itemsError } = orderNames.length === 0
+        ? { data: [], error: null }
+        : await supabase
+          .from('sales_order_items')
+          .select('name, parent, qty, delivery_date, item_code')
+          .in('parent', orderNames);
+
+      if (!itemsError && Array.isArray(items)) {
+        const ordersByName = new Map(salesOrders.map((order: any) => [order.name, order]));
+        return items.map((row: any) => {
+          const order = ordersByName.get(row.parent);
+          return {
         orderId: String(row.name ?? row.id ?? ''),
-        parentOrderId: String(row.sales_orders?.name ?? row.parent ?? ''),
-        customerId: String(row.sales_orders?.customer_name ?? ''),
+        parentOrderId: String(row.parent ?? ''),
+        customerId: String(order?.customer_name ?? ''),
         itemCode: String(row.item_code ?? ''),
         requestedQty: Number(row.qty ?? 0),
-        requestedDate: toDate(row.delivery_date ?? row.sales_orders?.delivery_date),
-        createdAt: toDate(row.sales_orders?.created_at),
-      }));
+        requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
+        createdAt: toDate(order?.created_at),
+          };
+        });
+      }
     }
 
-    console.warn('[dataSource] fetchOrders() Supabase query failed, fallback to mock data:', error?.message ?? 'unknown error');
+    console.warn(
+      '[dataSource] fetchOrders() Supabase query failed, fallback to mock data:',
+      salesOrdersError?.message ?? 'sales order items query failed',
+    );
   }
 
   return normalizeMockOrders();
@@ -101,25 +118,41 @@ export async function fetchDraftOrdersByItemCode(itemCode: string): Promise<Orde
     throw new Error('Supabase not configured');
   }
 
-  const { data, error } = await supabase
+  const { data: salesOrders, error: salesOrdersError } = await supabase
+    .from('sales_orders')
+    .select('name, customer_name, delivery_date, created_at')
+    .eq('status', 'Draft');
+
+  if (salesOrdersError) {
+    throw new Error(`Failed to fetch draft sales orders: ${salesOrdersError.message}`);
+  }
+
+  const orderNames = salesOrders?.map((order: any) => order.name) ?? [];
+  const { data, error } = orderNames.length === 0
+    ? { data: [], error: null }
+    : await supabase
     .from('sales_order_items')
-    .select('name, parent, qty, delivery_date, item_code, sales_orders!parent!inner(name, customer_name, delivery_date, created_at, status)')
+    .select('name, parent, qty, delivery_date, item_code')
     .eq('item_code', itemCode)
-    .eq('sales_orders.status', 'Draft');
+    .in('parent', orderNames);
 
   if (error) {
     throw new Error(`Failed to fetch draft orders: ${error.message}`);
   }
 
-  return (data ?? []).map((row: any) => ({
+  const ordersByName = new Map((salesOrders ?? []).map((order: any) => [order.name, order]));
+  return (data ?? []).map((row: any) => {
+    const order = ordersByName.get(row.parent);
+    return {
     orderId: String(row.name ?? row.id ?? ''),
-    parentOrderId: String(row.sales_orders?.name ?? row.parent ?? ''),
-    customerId: String(row.sales_orders?.customer_name ?? ''),
+    parentOrderId: String(row.parent ?? ''),
+    customerId: String(order?.customer_name ?? ''),
     itemCode: String(row.item_code ?? ''),
     requestedQty: Number(row.qty ?? 0),
-    requestedDate: toDate(row.delivery_date ?? row.sales_orders?.delivery_date),
-    createdAt: toDate(row.sales_orders?.created_at),
-  }));
+    requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
+    createdAt: toDate(order?.created_at),
+    };
+  });
 }
 
 export async function fetchCustomers(): Promise<Customer[]> {
