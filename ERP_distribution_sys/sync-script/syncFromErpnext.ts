@@ -411,7 +411,6 @@ async function fetchErpSalesOrderItems(orderNames: string[]): Promise<ErpSalesOr
  * 因為本專案 8 張表的主鍵欄位名稱並不統一（有 id、name、batch_id 等）。
  */
 const TABLE_PRIMARY_KEYS: Record<string, string> = {
-  allocation_recommendations: 'id',
   sales_order_items:          'name',
   inventory:                  'id',
   sales_orders:               'name',
@@ -421,8 +420,9 @@ const TABLE_PRIMARY_KEYS: Record<string, string> = {
 };
 
 /**
- * 按照外鍵依賴順序清空七張表（子表先清，父表後清）。
- * 不動 company_weights。
+ * 按照外鍵依賴順序清空六張同步資料表（子表先清，父表後清）。
+ * allocation_recommendations 是稽核歷史，刻意不清除；它只能使用業務鍵保存，
+ * 不能依賴每次同步都會重建的 sales_order_items.name。
  *
  * 刪除條件：.not(pkColumn, 'is', null)
  *   主鍵欄位保證不為 null，這個條件對 TEXT 與 BIGSERIAL 都通用，
@@ -434,7 +434,6 @@ const TABLE_PRIMARY_KEYS: Record<string, string> = {
 async function clearTables(supabase: SupabaseClient): Promise<void> {
   // 清空順序：子表 → 父表（已驗證符合外鍵依賴關係）
   const tables = [
-    'allocation_recommendations', // 外鍵參照 sales_order_items，必須最先清
     'sales_order_items',
     'inventory',
     'sales_orders',
@@ -609,9 +608,9 @@ async function main(): Promise<void> {
   }
 
   console.log('\n【Step 2】清空 Supabase 目標表...\n');
-  console.log('  ⚠️  將清空：allocation_recommendations、sales_order_items、inventory、');
+  console.log('  ⚠️  將清空：sales_order_items、inventory、');
   console.log('           sales_orders、batches、items、customers');
-  console.log('  ✓  保留：company_weights（不動）\n');
+  console.log('  ✓  保留：company_weights、allocation_recommendations（稽核歷史）\n');
   await clearTables(supabase);
   console.log('\n  清空完成。');
 

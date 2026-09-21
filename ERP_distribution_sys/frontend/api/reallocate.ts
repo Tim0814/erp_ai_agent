@@ -10,10 +10,16 @@ import {
 import type { AllocationInput, AllocationResult, Batch, CompanyWeights, Customer, Order } from '../lib/types.js';
 import { normalizeEnabledWeights } from '../lib/weights.js';
 
-async function fetchActiveAllocatedBatchIds(supabase: SupabaseClient): Promise<Set<string>> {
+async function fetchActiveAllocatedBatchIds(
+  supabase: SupabaseClient,
+  activeSalesOrders: Set<string>,
+): Promise<Set<string>> {
+  if (activeSalesOrders.size === 0) return new Set<string>();
+
   const { data, error } = await supabase
     .from('allocation_recommendations')
     .select('batch_id')
+    .in('sales_order', [...activeSalesOrders])
     .not('status', 'in', '("cancelled","rejected")');
 
   if (error) throw new Error(`Failed to fetch allocated batches: ${error.message}`);
@@ -61,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fetchCustomers(),
       fetchBatches(),
       fetchCompanyWeights(),
-      fetchActiveAllocatedBatchIds(supabase),
+      fetchActiveAllocatedBatchIds(supabase, new Set(draftOrderNames)),
     ]);
     if (!dbWeights) throw new Error('Company weights are unavailable');
 

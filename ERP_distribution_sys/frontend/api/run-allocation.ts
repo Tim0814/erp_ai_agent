@@ -28,11 +28,15 @@ import { DEFAULT_WEIGHTS, normalizeEnabledWeights } from "../lib/weights.js";
  */
 async function fetchExistingAllocatedBatchIds(
   supabase: SupabaseClient,
+  activeSalesOrders: Set<string>,
 ): Promise<Set<string>> {
+  if (activeSalesOrders.size === 0) return new Set<string>();
+
   const { data, error } = await supabase
     .from("allocation_recommendations")
     .select("batch_id")
-    .neq("status", "cancelled");
+    .in("sales_order", [...activeSalesOrders])
+    .not("status", "in", '("cancelled","rejected")');
 
   if (error) {
     console.warn(
@@ -104,7 +108,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase = createClient(supabaseUrl, supabaseKey);
       // 在執行分配引擎之前先查詢，確保燈號判斷能偵測跨執行期的重複分配
       existingAllocatedBatchIds =
-        await fetchExistingAllocatedBatchIds(supabase);
+        await fetchExistingAllocatedBatchIds(
+          supabase,
+          new Set(orders.map((order) => order.parentOrderId)),
+        );
     }
 
     const input: AllocationInput = {
