@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { createClient, type Session } from '@supabase/supabase-js';
 import { Recommendation } from './types';
 import { RecommendationCard } from './components/RecommendationCard';
 import { OverrideModal } from './components/OverrideModal';
-import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings } from 'lucide-react';
+import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, LogOut, LogIn } from 'lucide-react';
+
+// ── Supabase client（前端用 anon key，僅作身分驗證）────────────────────────────
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL as string,
+  import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+);
 
 // ── 規則 enabled 欄位型別 ──────────────────────────────────────────────────────
 
@@ -29,10 +36,61 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [overrideModalRec, setOverrideModalRec] = useState<Recommendation | null>(null);
 
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true); // 等 Supabase 確認 session
+  const [loginEmail, setLoginEmail] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+  const [loginSubmitting, setLoginSubmitting] = useState<boolean>(false);
+
+  // 取得 access token 的 helper（給所有審核 API 呼叫使用）
+  const getAuthHeader = (): Record<string, string> => {
+    const token = session?.access_token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // 規則啟用狀態（null = 尚未從 API 載入）
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
   const [rulesLoading, setRulesLoading] = useState<boolean>(false);
   const [settingsChanged, setSettingsChanged] = useState<boolean>(false);
+
+  // ── Supabase Auth：監聽 session 變化 ─────────────────────────────────────
+  useEffect(() => {
+    // 取得目前已存在的 session（頁面重整後不需要重新登入）
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      setSession(s);
+      setAuthLoading(false);
+    });
+
+    // 訂閱後續的 session 變更（登入 / 登出 / token refresh）
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setLoginSubmitting(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password: loginPassword,
+    });
+    if (error) {
+      setLoginError(error.message === 'Invalid login credentials'
+        ? '帳號或密碼錯誤，請重新輸入'
+        : error.message);
+    }
+    setLoginSubmitting(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setRecommendations([]);
+  };
 
   const fetchRecommendations = async () => {
     try {
@@ -93,7 +151,7 @@ export const App: React.FC = () => {
     try {
       const res = await fetch(`/api/review/${recId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ action, override_reason: overrideReason }),
       });
       const data = await res.json();
@@ -121,6 +179,7 @@ export const App: React.FC = () => {
       setLoading(true);
       const res = await fetch(`/api/orders/${encodeURIComponent(salesOrder)}/cancel`, {
         method: 'POST',
+        headers: { ...getAuthHeader() },
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -151,7 +210,7 @@ export const App: React.FC = () => {
       setLoading(true);
       const res = await fetch('/api/reallocate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ item_code: itemCode }),
       });
       const data = await res.json();
@@ -206,9 +265,11 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchRecommendations();
-    fetchRuleEnabled();
-  }, []);
+    if (session) {
+      fetchRecommendations();
+      fetchRuleEnabled();
+    }
+  }, [session]);
 
   // 分區過濾（依燈號分類，與審核流程 status 無關）
   const visibleRecommendations = recommendations.filter((r) => r.status !== 'cancelled');
@@ -220,6 +281,96 @@ export const App: React.FC = () => {
 
   return (
     <div className="dashboard-container">
+      {/* ── Auth：等待 session 確認中 ─────────────────────────────────────── */}
+      {authLoading && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <p style={{ color: '#94a3b8' }}>驗證中…</p>
+        </div>
+      )}
+
+      {/* ── Auth：尚未登入，顯示登入頁面 ──────────────────────────────────── */}
+      {!authLoading && !session && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          minHeight: '100vh', padding: '2rem',
+        }}>
+          <div style={{
+            background: 'rgba(18, 26, 41, 0.95)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '1rem', padding: '2.5rem', width: '100%', maxWidth: '400px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+              <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f1f5f9', margin: '0 0 0.5rem' }}>
+                食品供應鏈 ERP
+              </h1>
+              <p style={{ color: '#64748b', fontSize: '0.85rem', margin: 0 }}>
+                分配輔助系統 — 請先登入
+              </p>
+            </div>
+
+            <form onSubmit={handleLogin}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.4rem', fontWeight: 600 }}>
+                  帳號（Email）
+                </label>
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="operator@example.com"
+                  required
+                  style={{
+                    width: '100%', padding: '0.6rem 0.8rem', borderRadius: '0.5rem', fontSize: '0.9rem',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#f1f5f9', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.4rem', fontWeight: 600 }}>
+                  密碼
+                </label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  style={{
+                    width: '100%', padding: '0.6rem 0.8rem', borderRadius: '0.5rem', fontSize: '0.9rem',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#f1f5f9', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {loginError && (
+                <p style={{ color: '#ef4444', fontSize: '0.8rem', marginBottom: '1rem', fontWeight: 600 }}>
+                  ⚠️ {loginError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={loginSubmitting}
+                style={{ width: '100%', justifyContent: 'center' }}
+              >
+                <LogIn size={16} /> {loginSubmitting ? '登入中…' : '登入'}
+              </button>
+            </form>
+
+            <p style={{ color: '#475569', fontSize: '0.75rem', textAlign: 'center', marginTop: '1.5rem' }}>
+              帳號由系統管理員在 Supabase Dashboard 建立
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── 主畫面：已登入才顯示 ──────────────────────────────────────────── */}
+      {!authLoading && session && (<>
+
       {/* 頂部 Header */}
       <header className="header">
         <div className="title-group">
@@ -238,6 +389,13 @@ export const App: React.FC = () => {
           </button>
           <button className="btn btn-secondary" onClick={fetchRecommendations} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> 重新整理
+          </button>
+          {/* 登出按鈕：顯示目前登入者 email，提供登出入口 */}
+          <span style={{ color: '#64748b', fontSize: '0.8rem', alignSelf: 'center', marginLeft: '0.5rem' }}>
+            {session.user.email}
+          </span>
+          <button className="btn btn-secondary" onClick={handleLogout} title="登出">
+            <LogOut size={16} /> 登出
           </button>
         </div>
       </header>
@@ -344,6 +502,7 @@ export const App: React.FC = () => {
           onSubmit={(id, action, reason) => handleReviewAction(id, action, reason)}
         />
       )}
+      </>)}
     </div>
   );
 };
