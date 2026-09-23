@@ -19,12 +19,6 @@ function isBatchAvailable(expiryDate: string | null | undefined, asOfDate: strin
   return !expiryDate || expiryDate >= asOfDate;
 }
 
-export interface ATPBreakdown {
-  availableQty: number;
-  totalInventory: number;
-  allocatedPending: number;
-}
-
 /**
  * 計算指定商品在指定倉庫的可承諾庫存（ATP）。
  *
@@ -36,11 +30,7 @@ export interface ATPBreakdown {
  *
  * 未來排程生產量目前沒有資料表，因此不納入本次計算。
  */
-export async function calculateATPBreakdown(
-  itemCode: string,
-  warehouse: string,
-  asOfDate = new Date().toISOString().slice(0, 10),
-): Promise<ATPBreakdown> {
+export async function calculateATP(itemCode: string, warehouse: string, asOfDate = new Date().toISOString().slice(0, 10)): Promise<number> {
   const supabase = getSupabaseClient();
 
   const [{ data: inventoryRows, error: inventoryError }, { data: batchRows, error: batchError }] = await Promise.all([
@@ -85,19 +75,5 @@ export async function calculateATPBreakdown(
     isBatchAvailable(expiryByBatch.get(String(row.batch_id)), asOfDate),
   );
   const allocatedQuantity = sumQuantities(availableAllocationRows, 'recommended_qty');
-
-  return {
-    availableQty: currentInventory - allocatedQuantity,
-    totalInventory: currentInventory,
-    allocatedPending: allocatedQuantity,
-  };
-}
-
-export async function calculateATP(
-  itemCode: string,
-  warehouse: string,
-  asOfDate = new Date().toISOString().slice(0, 10),
-): Promise<number> {
-  const breakdown = await calculateATPBreakdown(itemCode, warehouse, asOfDate);
-  return breakdown.availableQty;
+  return currentInventory - allocatedQuantity;
 }
