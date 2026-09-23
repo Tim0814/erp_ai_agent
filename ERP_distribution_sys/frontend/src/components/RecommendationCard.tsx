@@ -1,12 +1,13 @@
 import React from 'react';
 import { Recommendation, ReviewAction } from '../types';
-import { CheckCircle2, Edit3, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Edit3, XCircle, AlertTriangle, ShieldCheck, Ban } from 'lucide-react';
 
 interface RecommendationCardProps {
   rec: Recommendation;
   onApprove: (id: string) => void;
   onOverride: (rec: Recommendation) => void;
   onReject: (id: string) => void;
+  onCancel: (salesOrder: string) => void;
 }
 
 export const RecommendationCard: React.FC<RecommendationCardProps> = ({
@@ -14,6 +15,7 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
   onApprove,
   onOverride,
   onReject,
+  onCancel,
 }) => {
   // 依 traffic_light 決定卡片配色與標籤，與審核流程 status 完全獨立
   const getStatusTheme = () => {
@@ -160,6 +162,11 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
         <button className="btn btn-sm btn-reject" onClick={() => onReject(rec.id)}>
           <XCircle size={14} /> 退回
         </button>
+        {rec.status !== 'cancelled' && (
+          <button className="btn btn-sm btn-secondary" onClick={() => onCancel(rec.sales_order)}>
+            <Ban size={14} /> 棄單
+          </button>
+        )}
       </div>
     </div>
   );

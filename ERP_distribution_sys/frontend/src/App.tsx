@@ -111,6 +111,63 @@ export const App: React.FC = () => {
     window.open('/api/export/csv', '_blank');
   };
 
+  const handleCancelOrder = async (salesOrder: string) => {
+    const confirmed = window.confirm(
+      `確定要棄單訂單 ${salesOrder} 嗎？此動作會將現有分配建議標記為取消，且無法復原。`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/orders/${encodeURIComponent(salesOrder)}/cancel`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '棄單失敗');
+      }
+
+      const releasedBatchIds = Array.isArray(data.released_batch_ids)
+        ? data.released_batch_ids
+        : [];
+      alert(
+        releasedBatchIds.length > 0
+          ? `訂單 ${salesOrder} 已棄單，已釋放批次：${releasedBatchIds.join(', ')}`
+          : `訂單 ${salesOrder} 已棄單，沒有需要釋放的批次。`,
+      );
+      await fetchRecommendations();
+    } catch (err) {
+      alert(`棄單失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReallocate = async () => {
+    const itemCode = window.prompt('請輸入要重新分配的商品代碼，例如 PROD-MILK-01：')?.trim();
+    if (!itemCode) return;
+
+    try {
+      setLoading(true);
+      const res = await fetch('/api/reallocate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_code: itemCode }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '重新分配失敗');
+      }
+
+      alert(`商品 ${itemCode} 已重新分配，產生 ${Number(data.count ?? 0)} 筆新建議。`);
+      await fetchRecommendations();
+    } catch (err) {
+      alert(`重新分配失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 勾選/取消勾選規則
   const handleRuleToggle = async (field: keyof RuleEnabledState, newValue: boolean) => {
     if (!ruleEnabled) return;
@@ -154,8 +211,9 @@ export const App: React.FC = () => {
   }, []);
 
   // 分區過濾（依燈號分類，與審核流程 status 無關）
-  const autoConfirmList = recommendations.filter((r) => r.traffic_light === 'green');
-  const manualReviewList = recommendations.filter((r) => r.traffic_light === 'yellow' || r.traffic_light === 'red');
+  const visibleRecommendations = recommendations.filter((r) => r.status !== 'cancelled');
+  const autoConfirmList = visibleRecommendations.filter((r) => r.traffic_light === 'green');
+  const manualReviewList = visibleRecommendations.filter((r) => r.traffic_light === 'yellow' || r.traffic_light === 'red');
 
   // 計算目前啟用的規則數，用於決定 checkbox 是否 disabled
   const enabledCount = ruleEnabled ? Object.values(ruleEnabled).filter(Boolean).length : 0;
@@ -174,6 +232,9 @@ export const App: React.FC = () => {
           </button>
           <button className="btn btn-secondary" onClick={handleExportCSV}>
             <Download size={16} /> 匯出 CSV
+          </button>
+          <button className="btn btn-secondary" onClick={handleReallocate} disabled={loading}>
+            <RefreshCw size={16} /> 重新分配
           </button>
           <button className="btn btn-secondary" onClick={fetchRecommendations} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> 重新整理
@@ -241,6 +302,7 @@ export const App: React.FC = () => {
                 onApprove={(id) => handleReviewAction(id, 'approved')}
                 onOverride={(r) => setOverrideModalRec(r)}
                 onReject={(id) => handleReviewAction(id, 'rejected')}
+                onCancel={handleCancelOrder}
               />
             ))}
           </div>
@@ -267,6 +329,7 @@ export const App: React.FC = () => {
                 onApprove={(id) => handleReviewAction(id, 'approved')}
                 onOverride={(r) => setOverrideModalRec(r)}
                 onReject={(id) => handleReviewAction(id, 'rejected')}
+                onCancel={handleCancelOrder}
               />
             ))}
           </div>
