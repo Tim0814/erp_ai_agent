@@ -12,29 +12,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { data, error } = await supabase
+
+    // Step 1：取得所有分配建議
+    const { data: recs, error: recError } = await supabase
       .from('allocation_recommendations')
-      .select(`
-        *,
-        sales_orders!inner(created_by)
-      `)
+      .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (recError) throw recError;
+    if (!recs || recs.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
 
-    // 將 JOIN 進來的 sales_orders.created_by 攤平到頂層，命名為 order_created_by
-    const flatData = (data ?? []).map((row: Record<string, unknown>) => {
-      const soRow = row['sales_orders'] as { created_by?: string | null } | null;
-      const { sales_orders: _so, ...rest } = row;
-      return {
-        ...rest,
-        order_created_by: soRow?.created_by ?? null,
-      };
-    });
+    // Step 2：收集去重的 sales_order 編號，查詢對應的 created_by
+    const orderNames = [...new Set(recs.map((r) => r.sales_order as string).filter(Boolean))];
+
+    const { data: orders, error: orderError } = await supabase
+      .from('sales_orders')
+      .select('name, created_by')
+      .in('name', orderNames);
+
+    if (orderError) throw orderError;
+
+    // 建立 sales_order name → created_by 的查找 Map
+    const createdByMap = new Map<string, string | null>(
+      (orders ?? []).map((o) => [o.name as string, (o.created_by as string | null) ?? null]),
+    );
+
+    // Step 3：將 created_by 攤平到每筆建議，命名為 order_created_by
+    const flatData = recs.map((rec) => ({
+      ...rec,
+      order_created_by: createdByMap.get(rec.sales_order as string) ?? null,
+    }));
 
     return res.status(200).json({ success: true, data: flatData });
   } catch (error) {
     console.error('Get recommendations error:', error);
-    return res.status(500).json({ error: 'Internal server error', details: error instanceof Error ? error.message : String(error) });
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : String(error),
+    });
   }
 }
