@@ -14,11 +14,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = createClient(supabaseUrl, supabaseKey);
     const { data, error } = await supabase
       .from('allocation_recommendations')
-      .select('*')
+      .select(`
+        *,
+        sales_orders!inner(created_by)
+      `)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return res.status(200).json({ success: true, data: data ?? [] });
+
+    // 將 JOIN 進來的 sales_orders.created_by 攤平到頂層，命名為 order_created_by
+    const flatData = (data ?? []).map((row: Record<string, unknown>) => {
+      const soRow = row['sales_orders'] as { created_by?: string | null } | null;
+      const { sales_orders: _so, ...rest } = row;
+      return {
+        ...rest,
+        order_created_by: soRow?.created_by ?? null,
+      };
+    });
+
+    return res.status(200).json({ success: true, data: flatData });
   } catch (error) {
     console.error('Get recommendations error:', error);
     return res.status(500).json({ error: 'Internal server error', details: error instanceof Error ? error.message : String(error) });

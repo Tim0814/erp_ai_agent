@@ -39,5 +39,8 @@ export interface Recommendation {
   // AI 說明
   rationale: string | null;
 
+  // ERPNext 訂單建立者（來自 sales_orders.created_by，即 ERPNext owner 欄位）
+  order_created_by: string | null;
+
   created_at: string;
 }

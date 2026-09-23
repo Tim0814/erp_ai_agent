@@ -341,12 +341,13 @@ interface ErpSalesOrder {
   delivery_date?: string;
   status: string;
   grand_total?: number;
+  owner: string;          // → sales_orders.created_by（ERPNext 文件建立者帳號）
 }
 
 async function fetchErpSalesOrders(): Promise<ErpSalesOrder[]> {
   // 只同步尚未完成或取消的訂單（Draft / To Deliver and Bill / To Bill）
   const rows = await erpFetchAll('Sales Order', [
-    'name', 'customer', 'transaction_date', 'delivery_date', 'status', 'grand_total',
+    'name', 'customer', 'transaction_date', 'delivery_date', 'status', 'grand_total', 'owner',
   ], [['Sales Order', 'docstatus', '=', 0]]); // docstatus=0 代表 Draft（草稿），AI 介入評估的時間點
 
   return rows.map((r) => ({
@@ -356,6 +357,7 @@ async function fetchErpSalesOrders(): Promise<ErpSalesOrder[]> {
     delivery_date:    r['delivery_date'] != null ? String(r['delivery_date']) : undefined,
     status:           String(r['status']           ?? ''),
     grand_total:      r['grand_total'] != null ? Number(r['grand_total']) : undefined,
+    owner:            String(r['owner']            ?? ''),
   }));
 }
 
@@ -531,6 +533,7 @@ async function upsertSalesOrders(
       delivery_date:    o.delivery_date ?? null,
       status:           'Draft',  // 同步進來的訂單，在分配系統視為 Draft（待分配）
       grand_total:      o.grand_total ?? null,
+      created_by:       o.owner || null,  // ERPNext 文件 owner 欄位（建立者帳號）
     })),
   );
   if (error) throw new Error(`寫入 sales_orders 失敗：${error.message}`);

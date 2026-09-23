@@ -50,6 +50,11 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                 #{rec.item_code}
               </span>
             </div>
+            {rec.order_created_by && (
+              <span style={{ fontSize: '0.72rem', color: '#64748b', display: 'block', marginTop: '0.1rem' }}>
+                建立者：{rec.order_created_by}
+              </span>
+            )}
             <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
               總分:{' '}
               <strong style={{ color: '#ffffff', fontSize: '0.9rem' }}>
