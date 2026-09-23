@@ -152,15 +152,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
 
     if (supabase) {
+      const insertedRecs: Record<string, unknown>[] = [];
       for (const rec of processed) {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from("allocation_recommendations")
-          .insert(rec);
+          .insert(rec)
+          .select()
+          .single();
         if (error) {
           console.error("Supabase insert error:", error);
           throw new Error(`Failed to insert recommendation: ${error.message}`);
         }
+        insertedRecs.push(inserted as Record<string, unknown>);
       }
+
+      // 補上 order_created_by：批次查詢 sales_orders.created_by
+      const orderNames = [...new Set(insertedRecs.map((r) => r.sales_order as string).filter(Boolean))];
+      const { data: soRows } = await supabase
+        .from("sales_orders")
+        .select("name, created_by")
+        .in("name", orderNames);
+      const createdByMap = new Map<string, string | null>(
+        (soRows ?? []).map((o) => [o.name as string, (o.created_by as string | null) ?? null]),
+      );
+
+      const flatData = insertedRecs.map((rec) => ({
+        ...rec,
+        order_created_by: createdByMap.get(rec.sales_order as string) ?? null,
+      }));
+
+      return res.status(200).json({ success: true, count: flatData.length, data: flatData });
     }
 
     return res

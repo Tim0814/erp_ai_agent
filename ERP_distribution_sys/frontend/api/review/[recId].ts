@@ -60,7 +60,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) throw error;
     if (!data) return res.status(404).json({ error: `找不到指定的分配紀錄: ${recId}` });
 
-    return res.status(200).json({ success: true, data });
+    // 補上 order_created_by：從 sales_orders 查詢對應訂單的 created_by，
+    // 確保前端 state 更新後這個欄位不會消失
+    let orderCreatedBy: string | null = null;
+    if (data.sales_order) {
+      const { data: soData } = await supabase
+        .from('sales_orders')
+        .select('created_by')
+        .eq('name', data.sales_order)
+        .single();
+      orderCreatedBy = soData?.created_by ?? null;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { ...data, order_created_by: orderCreatedBy },
+    });
   } catch (error) {
     console.error('Review error:', error);
     return res.status(500).json({
