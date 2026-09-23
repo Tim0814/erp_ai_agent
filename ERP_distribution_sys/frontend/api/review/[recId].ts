@@ -9,7 +9,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid recommendation ID' });
   }
 
-  const { action, override_reason } = req.body ?? {};
+  const { action, override_reason, operator } = req.body ?? {};
 
   // 前端送來的合法動作值
   const validActions = ['approved', 'overridden', 'rejected'];
@@ -39,14 +39,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const isOverridden = action === 'overridden';
 
+    // operator：前端傳入的操作者姓名，fallback 到 'operator' 確保向後相容
+    const operatorName = (typeof operator === 'string' && operator.trim())
+      ? operator.trim()
+      : 'operator';
+
     const updatePayload: Record<string, unknown> = {
       status: newStatus,
-      reviewed_by: 'operator',
+      reviewed_by: operatorName,
       reviewed_at: now,
       // 覆寫相關欄位
       is_overridden: isOverridden,
       override_reason: isOverridden ? override_reason.trim() : null,
-      overridden_by: isOverridden ? 'operator' : null,
+      overridden_by: isOverridden ? operatorName : null,
       overridden_at: isOverridden ? now : null,
     };
 

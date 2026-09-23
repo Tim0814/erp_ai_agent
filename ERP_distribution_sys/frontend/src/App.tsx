@@ -2,7 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Recommendation } from './types';
 import { RecommendationCard } from './components/RecommendationCard';
 import { OverrideModal } from './components/OverrideModal';
-import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings } from 'lucide-react';
+import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, UserCheck } from 'lucide-react';
+
+// ── 操作者清單（假名，可自行修改）────────────────────────────────────────────
+const OPERATOR_LIST = [
+  '王大明',
+  '林小華',
+  '陳志偉',
+  '張美玲',
+  '李建國',
+] as const;
 
 // ── 規則 enabled 欄位型別 ──────────────────────────────────────────────────────
 
@@ -28,6 +37,11 @@ export const App: React.FC = () => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [overrideModalRec, setOverrideModalRec] = useState<Recommendation | null>(null);
+
+  // ── 操作者身分聲明（sessionStorage 跨重整保留）────────────────────────────
+  const [operator, setOperator] = useState<string>(
+    () => sessionStorage.getItem('erp_operator') ?? '',
+  );
 
   // 規則啟用狀態（null = 尚未從 API 載入）
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
@@ -90,11 +104,15 @@ export const App: React.FC = () => {
   };
 
   const handleReviewAction = async (recId: string, action: 'approved' | 'overridden' | 'rejected', overrideReason?: string) => {
+    if (!operator) {
+      alert('請先在右上角選擇操作者身分，再執行審核動作。');
+      return;
+    }
     try {
       const res = await fetch(`/api/review/${recId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, override_reason: overrideReason }),
+        body: JSON.stringify({ action, override_reason: overrideReason, operator }),
       });
       const data = await res.json();
       if (data.success) {
@@ -239,6 +257,33 @@ export const App: React.FC = () => {
           <button className="btn btn-secondary" onClick={fetchRecommendations} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> 重新整理
           </button>
+          {/* ── 操作者身分聲明選單 ── */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.75rem' }}>
+            <UserCheck size={15} style={{ color: operator ? '#10b981' : '#64748b', flexShrink: 0 }} />
+            <select
+              value={operator}
+              onChange={(e) => {
+                const v = e.target.value;
+                setOperator(v);
+                sessionStorage.setItem('erp_operator', v);
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: `1px solid ${operator ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.15)'}`,
+                borderRadius: '0.4rem',
+                color: operator ? '#e2e8f0' : '#64748b',
+                fontSize: '0.82rem',
+                padding: '0.35rem 0.6rem',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="">── 選擇操作者 ──</option>
+              {OPERATOR_LIST.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </header>
 
