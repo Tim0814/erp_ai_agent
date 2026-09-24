@@ -253,8 +253,11 @@ export async function runAllocation(
   const totalOrders = orderedByPriority.length;
   let processedCount = 0;
 
-  /** 每次 LLM 呼叫之間的間隔（毫秒），降低觸發 Gemini 速率限制的機率 */
-  const INTER_REQUEST_DELAY_MS = 2_500;
+  /** 每次 LLM 呼叫之間的間隔（毫秒）
+   * 設為 8 秒，讓 Gemini quota 在兩次請求之間有足夠時間恢復，
+   * 降低觸發速率限制的機率（免費層約 15 RPM，即每 4 秒 1 次）
+   */
+  const INTER_REQUEST_DELAY_MS = 8_000;
 
   /** Promise-based sleep，供呼叫間延遲使用 */
   const sleep = (ms: number): Promise<void> =>

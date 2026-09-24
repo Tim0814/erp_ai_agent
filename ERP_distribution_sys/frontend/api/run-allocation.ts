@@ -171,22 +171,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     if (supabase) {
-      const insertedRecs: Record<string, unknown>[] = [];
-      for (const rec of processed) {
-        const { data: inserted, error } = await supabase
-          .from("allocation_recommendations")
-          .insert(rec)
-          .select()
-          .single();
-        if (error) {
-          console.error("Supabase insert error:", error);
-          throw new Error(`Failed to insert recommendation: ${error.message}`);
-        }
-        insertedRecs.push(inserted as Record<string, unknown>);
+      // bulk insert：一次寫入全部筆數，避免逐筆 insert 在中途逾時時留下部分髒資料
+      const { data: insertedRecs, error: insertError } = await supabase
+        .from("allocation_recommendations")
+        .insert(processed)
+        .select();
+
+      if (insertError) {
+        console.error("Supabase insert error:", insertError);
+        throw new Error(`Failed to insert recommendations: ${insertError.message}`);
       }
 
+      const inserted = (insertedRecs ?? []) as Record<string, unknown>[];
+
       // 補上 order_created_by：批次查詢 sales_orders.created_by
-      const orderNames = [...new Set(insertedRecs.map((r) => r.sales_order as string).filter(Boolean))];
+      const orderNames = [...new Set(inserted.map((r) => r.sales_order as string).filter(Boolean))];
       const { data: soRows } = await supabase
         .from("sales_orders")
         .select("name, created_by")
@@ -195,7 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (soRows ?? []).map((o) => [o.name as string, (o.created_by as string | null) ?? null]),
       );
 
-      const flatData = insertedRecs.map((rec) => ({
+      const flatData = inserted.map((rec) => ({
         ...rec,
         order_created_by: createdByMap.get(rec.sales_order as string) ?? null,
       }));

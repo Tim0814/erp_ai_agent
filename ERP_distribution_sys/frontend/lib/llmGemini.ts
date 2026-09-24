@@ -11,16 +11,11 @@ interface GeminiResponse {
   };
 }
 
-/** 最多重試次數（僅限 429 速率限制錯誤） */
-const MAX_RETRY = 2;
-
-/** 遇到 429 時每次重試前等待的毫秒數 */
-const RETRY_DELAY_MS = 7_000;
-
-/** 簡單的 Promise-based sleep */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/**
+ * 最多重試次數（僅限 429 速率限制錯誤）
+ * 設為 0 表示遇到 429 直接 fallback，不重試，避免等待時間拖垮 Vercel Function 逾時
+ */
+const MAX_RETRY = 0;
 
 /**
  * 呼叫 Google Gemini REST API (gemini-1.5-flash) 的實作
@@ -75,23 +70,10 @@ export class GeminiExplainer implements LlmExplainer {
           }),
         });
 
-        // ── 429 速率限制：等待後重試 ────────────────────────────────────────
+        // ── 429 速率限制：直接 fallback（不重試，避免等待時間拖垮逾時預算）──
         if (response.status === 429) {
-          attempt++;
-          if (attempt <= MAX_RETRY) {
-            console.error(
-              `[Gemini 429限流，重試中 ${attempt}/${MAX_RETRY}]` +
-              `，等待 ${RETRY_DELAY_MS / 1000} 秒後重試...`,
-            );
-            await sleep(RETRY_DELAY_MS);
-            continue; // 重新進入 while 迴圈
-          } else {
-            // 已達重試上限
-            console.error(
-              `[Gemini 重試失敗，改用備援]：429 速率限制，已重試 ${MAX_RETRY} 次仍失敗`,
-            );
-            return await this.fallbackStub.explain(prompt);
-          }
+          console.error("[Gemini 429限流，改用備援]");
+          return await this.fallbackStub.explain(prompt);
         }
 
         // ── 其他非 2xx 錯誤：直接降級，不重試 ─────────────────────────────
