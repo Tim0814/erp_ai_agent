@@ -65,47 +65,69 @@ function normalizeMockBatches(): Batch[] {
 }
 
 export async function fetchOrders(): Promise<Order[]> {
-  const supabase = getSupabaseClient();
-
-  if (supabase) {
-    const { data: salesOrders, error: salesOrdersError } = await supabase
-      .from('sales_orders')
-      .select('name, customer_name, delivery_date, created_at')
-      .eq('status', 'Draft');
-
-    if (!salesOrdersError && Array.isArray(salesOrders)) {
-      const orderNames = salesOrders.map((order: any) => order.name);
-      const { data: items, error: itemsError } = orderNames.length === 0
-        ? { data: [], error: null }
-        : await supabase
-          .from('sales_order_items')
-          .select('name, parent, qty, delivery_date, item_code')
-          .in('parent', orderNames);
-
-      if (!itemsError && Array.isArray(items)) {
-        const ordersByName = new Map(salesOrders.map((order: any) => [order.name, order]));
-        return items.map((row: any) => {
-          const order = ordersByName.get(row.parent);
-          return {
-        orderId: String(row.name ?? row.id ?? ''),
-        parentOrderId: String(row.parent ?? ''),
-        customerId: String(order?.customer_name ?? ''),
-        itemCode: String(row.item_code ?? ''),
-        requestedQty: Number(row.qty ?? 0),
-        requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
-        createdAt: toDate(order?.created_at),
-          };
-        });
-      }
-    }
-
-    console.warn(
-      '[dataSource] fetchOrders() Supabase query failed, fallback to mock data:',
-      salesOrdersError?.message ?? 'sales order items query failed',
-    );
+  // 明確的開發模式旗標：只有 USE_MOCK_DATA=true 時才使用假資料
+  if (process.env.USE_MOCK_DATA === 'true') {
+    return normalizeMockOrders();
   }
 
-  return normalizeMockOrders();
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const msg = '[dataSource] fetchOrders 查詢失敗，原因：Supabase 環境變數未設定（SUPABASE_URL / SUPABASE_ANON_KEY）';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  const { data: salesOrders, error: salesOrdersError } = await supabase
+    .from('sales_orders')
+    .select('name, customer_name, delivery_date, created_at')
+    .eq('status', 'Draft');
+
+  if (salesOrdersError) {
+    const msg = `[dataSource] fetchOrders 查詢失敗，原因：sales_orders 查詢錯誤 — ${salesOrdersError.message}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  if (!Array.isArray(salesOrders)) {
+    const msg = '[dataSource] fetchOrders 查詢失敗，原因：sales_orders 回傳非陣列';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  const orderNames = salesOrders.map((order: any) => order.name);
+  const { data: items, error: itemsError } = orderNames.length === 0
+    ? { data: [], error: null }
+    : await supabase
+      .from('sales_order_items')
+      .select('name, parent, qty, delivery_date, item_code')
+      .in('parent', orderNames);
+
+  if (itemsError) {
+    const msg = `[dataSource] fetchOrders 查詢失敗，原因：sales_order_items 查詢錯誤 — ${itemsError.message}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  if (!Array.isArray(items)) {
+    const msg = '[dataSource] fetchOrders 查詢失敗，原因：sales_order_items 回傳非陣列';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  const ordersByName = new Map(salesOrders.map((order: any) => [order.name, order]));
+  return items.map((row: any) => {
+    const order = ordersByName.get(row.parent);
+    return {
+      orderId: String(row.name ?? row.id ?? ''),
+      parentOrderId: String(row.parent ?? ''),
+      customerId: String(order?.customer_name ?? ''),
+      itemCode: String(row.item_code ?? ''),
+      requestedQty: Number(row.qty ?? 0),
+      requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
+      createdAt: toDate(order?.created_at),
+    };
+  });
 }
 
 /**
@@ -156,79 +178,112 @@ export async function fetchDraftOrdersByItemCode(itemCode: string): Promise<Orde
 }
 
 export async function fetchCustomers(): Promise<Customer[]> {
-  const supabase = getSupabaseClient();
-
-  if (supabase) {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('customer_name, customer_tier, territory');
-
-    if (!error && Array.isArray(data)) {
-      return data.map((row: any) => ({
-        customerId: String(row.customer_name ?? ''),
-        tierScore: FALLBACK_TIER_SCORE[String(row.customer_tier ?? '').toLowerCase()] ?? 0,
-        region: String(row.territory ?? ''),
-      }));
-    }
-
-    console.warn('[dataSource] fetchCustomers() Supabase query failed, fallback to mock data:', error?.message ?? 'unknown error');
+  // 明確的開發模式旗標：只有 USE_MOCK_DATA=true 時才使用假資料
+  if (process.env.USE_MOCK_DATA === 'true') {
+    return normalizeMockCustomers();
   }
 
-  return normalizeMockCustomers();
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const msg = '[dataSource] fetchCustomers 查詢失敗，原因：Supabase 環境變數未設定（SUPABASE_URL / SUPABASE_ANON_KEY）';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  const { data, error } = await supabase
+    .from('customers')
+    .select('customer_name, customer_tier, territory');
+
+  if (error) {
+    const msg = `[dataSource] fetchCustomers 查詢失敗，原因：${error.message}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  if (!Array.isArray(data)) {
+    const msg = '[dataSource] fetchCustomers 查詢失敗，原因：customers 回傳非陣列';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  return data.map((row: any) => ({
+    customerId: String(row.customer_name ?? ''),
+    tierScore: FALLBACK_TIER_SCORE[String(row.customer_tier ?? '').toLowerCase()] ?? 0,
+    region: String(row.territory ?? ''),
+  }));
 }
 
 export async function fetchBatches(): Promise<Batch[]> {
-  const supabase = getSupabaseClient();
-
-  if (supabase) {
-    const [batchesResult, inventoryResult] = await Promise.all([
-      supabase.from('batches').select('batch_id, item_code, expiry_date'),
-      supabase.from('inventory').select('batch_id, actual_qty, warehouse'),
-    ]);
-
-    const batchError = batchesResult.error;
-    const inventoryError = inventoryResult.error;
-
-    if (!batchError && !inventoryError && Array.isArray(batchesResult.data) && Array.isArray(inventoryResult.data)) {
-      // 本次範圍刻意不做跨倉分拆：同一批次只取庫存量最大的倉庫，
-      // 避免合併後的數量超過單一倉庫可實際出貨的量，也讓區域評分維持單一值。
-      const inventoryByBatch = new Map<string, { actualQty: number; warehouseRegion: string }>();
-
-      for (const row of inventoryResult.data as any[]) {
-        const batchId = String(row.batch_id ?? '');
-        if (!batchId) continue;
-
-        const actualQty = Number(row.actual_qty ?? 0);
-        const current = inventoryByBatch.get(batchId);
-        if (!current || actualQty > current.actualQty) {
-          inventoryByBatch.set(batchId, {
-            actualQty,
-            warehouseRegion: String(row.warehouse ?? ''),
-          });
-        }
-      }
-
-      return (batchesResult.data as any[]).map((row) => {
-        const batchId = String(row.batch_id ?? '');
-        const inventoryInfo = inventoryByBatch.get(batchId) ?? { actualQty: 0, warehouseRegion: '' };
-
-        return {
-          batchId,
-          productId: String(row.item_code ?? ''),
-          availableQty: Number(inventoryInfo.actualQty ?? 0),
-          expiryDate: toDate(row.expiry_date),
-          warehouseRegion: inventoryInfo.warehouseRegion,
-        };
-      });
-    }
-
-    console.warn('[dataSource] fetchBatches() Supabase query failed, fallback to mock data:', {
-      batchesError: batchError?.message ?? 'none',
-      inventoryError: inventoryError?.message ?? 'none',
-    });
+  // 明確的開發模式旗標：只有 USE_MOCK_DATA=true 時才使用假資料
+  if (process.env.USE_MOCK_DATA === 'true') {
+    return normalizeMockBatches();
   }
 
-  return normalizeMockBatches();
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    const msg = '[dataSource] fetchBatches 查詢失敗，原因：Supabase 環境變數未設定（SUPABASE_URL / SUPABASE_ANON_KEY）';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  const [batchesResult, inventoryResult] = await Promise.all([
+    supabase.from('batches').select('batch_id, item_code, expiry_date'),
+    supabase.from('inventory').select('batch_id, actual_qty, warehouse'),
+  ]);
+
+  const batchError = batchesResult.error;
+  const inventoryError = inventoryResult.error;
+
+  if (batchError) {
+    const msg = `[dataSource] fetchBatches 查詢失敗，原因：batches 查詢錯誤 — ${batchError.message}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  if (inventoryError) {
+    const msg = `[dataSource] fetchBatches 查詢失敗，原因：inventory 查詢錯誤 — ${inventoryError.message}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  if (!Array.isArray(batchesResult.data) || !Array.isArray(inventoryResult.data)) {
+    const msg = '[dataSource] fetchBatches 查詢失敗，原因：batches 或 inventory 回傳非陣列';
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  // 本次範圍刻意不做跨倉分拆：同一批次只取庫存量最大的倉庫，
+  // 避免合併後的數量超過單一倉庫可實際出貨的量，也讓區域評分維持單一值。
+  const inventoryByBatch = new Map<string, { actualQty: number; warehouseRegion: string }>();
+
+  for (const row of inventoryResult.data as any[]) {
+    const batchId = String(row.batch_id ?? '');
+    if (!batchId) continue;
+
+    const actualQty = Number(row.actual_qty ?? 0);
+    const current = inventoryByBatch.get(batchId);
+    if (!current || actualQty > current.actualQty) {
+      inventoryByBatch.set(batchId, {
+        actualQty,
+        warehouseRegion: String(row.warehouse ?? ''),
+      });
+    }
+  }
+
+  return (batchesResult.data as any[]).map((row) => {
+    const batchId = String(row.batch_id ?? '');
+    const inventoryInfo = inventoryByBatch.get(batchId) ?? { actualQty: 0, warehouseRegion: '' };
+
+    return {
+      batchId,
+      productId: String(row.item_code ?? ''),
+      availableQty: Number(inventoryInfo.actualQty ?? 0),
+      expiryDate: toDate(row.expiry_date),
+      warehouseRegion: inventoryInfo.warehouseRegion,
+    };
+  });
 }
 
 export async function fetchCompanyWeights(): Promise<Record<string, unknown> | null> {

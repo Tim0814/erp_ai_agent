@@ -89,7 +89,15 @@ export const App: React.FC = () => {
 
       // 檢查 HTTP 狀態碼
       if (!res.ok) {
-        alert(`執行分配引擎失敗: ${data.error || '未知錯誤'}\n詳細資訊: ${data.details || '無'}`);
+        const details: string = data.details || '';
+        // dataSource throw 的錯誤訊息會帶有 [dataSource] 前綴，
+        // 用來判斷是資料來源異常，給使用者更明確的提示
+        const isDataSourceError = details.includes('[dataSource]');
+        if (isDataSourceError) {
+          alert(`資料來源異常：無法讀取訂單／客戶／批次資料，請確認 Supabase 連線正常。\n\n詳細原因：${details}`);
+        } else {
+          alert(`執行分配引擎失敗: ${data.error || '未知錯誤'}\n詳細資訊: ${details || '無'}`);
+        }
         return;
       }
 
@@ -97,7 +105,9 @@ export const App: React.FC = () => {
         setRecommendations(data.data);
       }
     } catch (err) {
-      alert('觸發分配引擎失敗，請檢查後端 (FastAPI:8000 與 Engine:4000) 是否啟動');
+      // fetch 本身拋錯代表網路層完全無法連線（後端 process 未啟動或 DNS 失敗），
+      // 與 Supabase 查詢失敗（HTTP 500）是不同的錯誤路徑
+      alert('無法連線到分配引擎 API，請確認後端服務是否正常啟動。');
     } finally {
       setLoading(false);
     }
