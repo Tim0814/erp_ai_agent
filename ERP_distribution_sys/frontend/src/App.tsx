@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Recommendation } from './types';
 import { RecommendationCard } from './components/RecommendationCard';
 import { OverrideModal } from './components/OverrideModal';
-import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, UserCheck } from 'lucide-react';
+import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, UserCheck, Trash2 } from 'lucide-react';
 
 // ── 操作者清單（假名，可自行修改）────────────────────────────────────────────
 const OPERATOR_LIST = [
@@ -196,6 +196,35 @@ export const App: React.FC = () => {
     }
   };
 
+  // 清空分配建議（開發模式按鈕，VITE_ENABLE_RESET_BUTTON=true 才渲染）
+  const handleResetRecommendations = async () => {
+    const input = window.prompt(
+      '⚠️ 此操作將清空所有分配建議，且無法復原。請輸入「確認清空」以繼續：',
+    );
+    // 使用者取消 prompt 或輸入不符
+    if (input === null) return;
+    if (input.trim() !== '確認清空') {
+      alert('輸入不符，操作已取消。');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch('/api/admin/reset-recommendations', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.details || data.error || '清空失敗');
+      }
+      alert(`已重置，共刪除 ${Number(data.deleted_count ?? 0)} 筆。`);
+      // 清空後重新整理前端列表
+      setRecommendations([]);
+    } catch (err) {
+      alert(`清空失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 勾選/取消勾選規則
   const handleRuleToggle = async (field: keyof RuleEnabledState, newValue: boolean) => {
     if (!ruleEnabled) return;
@@ -267,6 +296,18 @@ export const App: React.FC = () => {
           <button className="btn btn-secondary" onClick={fetchRecommendations} disabled={loading}>
             <RefreshCw size={16} className={loading ? 'spin' : ''} /> 重新整理
           </button>
+          {/* ── 開發用清空按鈕：VITE_ENABLE_RESET_BUTTON=true 才渲染，預設不顯示 ── */}
+          {import.meta.env.VITE_ENABLE_RESET_BUTTON === 'true' && (
+            <button
+              className="btn btn-secondary"
+              onClick={handleResetRecommendations}
+              disabled={loading}
+              style={{ borderColor: 'rgba(239,68,68,0.4)', color: '#ef4444' }}
+              title="清空 allocation_recommendations（開發模式）"
+            >
+              <Trash2 size={16} /> 清空建議
+            </button>
+          )}
           {/* ── 操作者身分聲明選單 ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: '0.75rem' }}>
             <UserCheck size={15} style={{ color: operator ? '#10b981' : '#64748b', flexShrink: 0 }} />
