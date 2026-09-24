@@ -129,27 +129,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const now = new Date().toISOString();
     const ordersById = new Map(orders.map((order) => [order.orderId, order]));
     const batchesById = new Map(batches.map((batch) => [batch.batchId, batch]));
-    const processed = results.map((item) => ({
-      sales_order: ordersById.get(item.orderId)?.parentOrderId ?? "",
-      item_code: ordersById.get(item.orderId)?.itemCode ?? "",
-      batch_id: item.recommendedBatchId,
-      warehouse: item.recommendedBatchId
-        ? batchesById.get(item.recommendedBatchId)?.warehouseRegion ||
-          "unassigned"
-        : "unassigned",
-      recommended_qty: ordersById.get(item.orderId)?.requestedQty ?? 0,
-      score: item.totalScore,
-      rationale: item.explanation ?? "",
-      fefo_score: item.scores.expiry,
-      urgency_score: item.scores.urgency,
-      order_time_score: item.scores.orderTime,
-      customer_tier_score: item.scores.customerTier,
-      region_score: item.scores.regionCluster,
-      traffic_light: item.signalColor,
-      traffic_light_reason: item.signalReason || null,
-      status: "pending",
-      created_at: now,
-    }));
+
+    // Red-2 交期衝突的 blockedReason pattern：
+    // 「批次效期（YYYY-MM-DD）早於客戶要求交期（YYYY-MM-DD），出貨時已過期」
+    const DELIVERY_CONFLICT_PATTERN = /批次效期（.+?）早於客戶要求交期（.+?）/;
+
+    const processed = results.map((item) => {
+      const blocked = item.status === "blocked";
+      const reason = item.blockedReason ?? "";
+
+      // flag_shortage：blocked 且 blockedReason 包含「庫存不足」
+      const flag_shortage = blocked && reason.includes("庫存不足");
+
+      // flag_delivery_conflict：blockedReason 符合 Red-2 交期衝突 pattern
+      // 注意：Red-2 走的是正常分配路徑（status !== 'blocked'），不能加 blocked && 前提
+      const flag_delivery_conflict = reason.length > 0 && DELIVERY_CONFLICT_PATTERN.test(reason);
+
+      return {
+        sales_order: ordersById.get(item.orderId)?.parentOrderId ?? "",
+        item_code: ordersById.get(item.orderId)?.itemCode ?? "",
+        batch_id: item.recommendedBatchId,
+        warehouse: item.recommendedBatchId
+          ? batchesById.get(item.recommendedBatchId)?.warehouseRegion ||
+            "unassigned"
+          : "unassigned",
+        recommended_qty: ordersById.get(item.orderId)?.requestedQty ?? 0,
+        score: item.totalScore,
+        rationale: item.explanation ?? "",
+        fefo_score: item.scores.expiry,
+        urgency_score: item.scores.urgency,
+        order_time_score: item.scores.orderTime,
+        customer_tier_score: item.scores.customerTier,
+        region_score: item.scores.regionCluster,
+        traffic_light: item.signalColor,
+        traffic_light_reason: item.signalReason || null,
+        flag_shortage,
+        flag_delivery_conflict,
+        status: "pending",
+        created_at: now,
+      };
+    });
 
     if (supabase) {
       const insertedRecs: Record<string, unknown>[] = [];

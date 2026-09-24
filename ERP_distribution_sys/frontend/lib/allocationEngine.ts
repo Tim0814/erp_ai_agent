@@ -250,6 +250,16 @@ export async function runAllocation(
   // 追蹤本次執行中已分配的 batchId（用於 Red-4 跨訂單重複分配檢查）
   const allocatedThisRun = new Set<string>();
 
+  const totalOrders = orderedByPriority.length;
+  let processedCount = 0;
+
+  /** 每次 LLM 呼叫之間的間隔（毫秒），降低觸發 Gemini 速率限制的機率 */
+  const INTER_REQUEST_DELAY_MS = 2_500;
+
+  /** Promise-based sleep，供呼叫間延遲使用 */
+  const sleep = (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
   for (const order of orderedByPriority) {
     const customer = customers.get(order.customerId);
     if (!customer) {
@@ -275,8 +285,11 @@ export async function runAllocation(
         signalColor: signal.color,
         signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
       };
+      processedCount++;
+      console.log(`[分配引擎] 處理中 ${processedCount}/${totalOrders}（訂單 ${order.orderId}）`);
       blockedResult.explanation = await explainer.explain(buildPrompt(blockedResult));
       resultMap.set(order.orderId, blockedResult);
+      if (processedCount < totalOrders) await sleep(INTER_REQUEST_DELAY_MS);
       continue;
     }
 
@@ -332,8 +345,11 @@ export async function runAllocation(
         signalColor: 'red',
         signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
       };
+      processedCount++;
+      console.log(`[分配引擎] 處理中 ${processedCount}/${totalOrders}（訂單 ${order.orderId}）`);
       dupResult.explanation = await explainer.explain(buildPrompt(dupResult));
       resultMap.set(order.orderId, dupResult);
+      if (processedCount < totalOrders) await sleep(INTER_REQUEST_DELAY_MS);
       continue; // 不扣減庫存，不加入 allocatedThisRun
     }
 
@@ -365,8 +381,11 @@ export async function runAllocation(
       signalReason: signal.reason, // 對應 DB traffic_light_reason 欄位
     };
     // 若有被跳過的高分批次，將其 context 傳入 buildPrompt 供 LLM 自然帶入說明
+    processedCount++;
+    console.log(`[分配引擎] 處理中 ${processedCount}/${totalOrders}（訂單 ${order.orderId}）`);
     result.explanation = await explainer.explain(buildPrompt(result, skippedCandidate ?? undefined));
     resultMap.set(order.orderId, result);
+    if (processedCount < totalOrders) await sleep(INTER_REQUEST_DELAY_MS);
   }
 
   // 步驟 6：依原始 orders 順序輸出（保證輸出順序與輸入一致）
