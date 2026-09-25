@@ -80,7 +80,7 @@ export async function fetchOrders(): Promise<Order[]> {
 
   const { data: salesOrders, error: salesOrdersError } = await supabase
     .from('sales_orders')
-    .select('name, customer_name, delivery_date, created_at')
+    .select('name, customer_name, delivery_date, created_at, transaction_date')
     .eq('status', 'Draft');
 
   if (salesOrdersError) {
@@ -125,7 +125,7 @@ export async function fetchOrders(): Promise<Order[]> {
       itemCode: String(row.item_code ?? ''),
       requestedQty: Number(row.qty ?? 0),
       requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
-      createdAt: toDate(order?.created_at),
+      createdAt: toDate(order?.transaction_date),
     };
   });
 }
@@ -142,7 +142,7 @@ export async function fetchDraftOrdersByItemCode(itemCode: string): Promise<Orde
 
   const { data: salesOrders, error: salesOrdersError } = await supabase
     .from('sales_orders')
-    .select('name, customer_name, delivery_date, created_at')
+    .select('name, customer_name, delivery_date, created_at, transaction_date')
     .eq('status', 'Draft');
 
   if (salesOrdersError) {
@@ -172,7 +172,7 @@ export async function fetchDraftOrdersByItemCode(itemCode: string): Promise<Orde
     itemCode: String(row.item_code ?? ''),
     requestedQty: Number(row.qty ?? 0),
     requestedDate: toDate(row.delivery_date ?? order?.delivery_date),
-    createdAt: toDate(order?.created_at),
+    createdAt: toDate(order?.transaction_date),
     };
   });
 }
