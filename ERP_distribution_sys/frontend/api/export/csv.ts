@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 不使用 PostgREST 關聯嵌入：稽核表刻意不依賴會隨同步重建的外鍵。
     const { data, error } = await supabase
       .from('allocation_recommendations')
-      .select('sales_order, recommended_qty, item_code, batch_id, warehouse, score, traffic_light, status, reviewed_at')
+      .select('sales_order, recommended_qty, item_code, batch_id, warehouse, score, fefo_score, urgency_score, order_time_score, customer_tier_score, region_score, traffic_light, status, reviewed_at')
       .eq('status', 'approved')
       .order('reviewed_at', { ascending: false });
 
@@ -66,6 +66,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       '建議批次',
       '倉庫',
       '加權總分',
+      '先效期先出(FEFO)',
+      '緊急度',
+      '下單時間',
+      '客戶等級',
+      '區域群聚',
       '燈號',
       '審核狀態',
       '核准時間',
@@ -84,6 +89,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         r.batch_id ?? '',
         (r.warehouse ?? '') + warehouseSuffix,
         r.score ?? 0,
+        r.fefo_score ?? 0,
+        r.urgency_score ?? 0,
+        r.order_time_score ?? 0,
+        r.customer_tier_score ?? 0,
+        r.region_score ?? 0,
         r.traffic_light ?? '',
         r.status ?? '',
         formatReviewedAt(r.reviewed_at),
