@@ -45,6 +45,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // CSV 欄位跳脫：雙引號包覆，內部雙引號轉義
     const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
+    // 核准時間：ISO → yyyy-mm-dd HH:mm:ss（去掉 T、時區偏移、小數秒）
+    const formatReviewedAt = (iso: string | null): string => {
+      if (!iso) return '';
+      return new Date(iso).toISOString().slice(0, 19).replace('T', ' ');
+    };
+
+    // 倉庫後綴：ERPNext Data Import 需要完整倉庫名稱（含後綴）
+    const warehouseSuffix = process.env.WAREHOUSE_SUFFIX ?? '';
+    if (!warehouseSuffix) {
+      console.warn('[csv export] 未設定 WAREHOUSE_SUFFIX，倉庫欄位可能無法匯入 ERPNext');
+    }
+
     const HEADERS = [
       '訂單編號',
       '客戶名稱',
@@ -70,11 +82,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         r.item_code ?? '',
         r.recommended_qty ?? 0,
         r.batch_id ?? '',
-        r.warehouse ?? '',
+        (r.warehouse ?? '') + warehouseSuffix,
         r.score ?? 0,
         r.traffic_light ?? '',
         r.status ?? '',
-        r.reviewed_at ?? '',
+        formatReviewedAt(r.reviewed_at),
       ].map(escape).join(',');
     });
 
