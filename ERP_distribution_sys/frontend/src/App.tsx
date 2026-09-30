@@ -13,6 +13,32 @@ const OPERATOR_LIST = [
   '李建國',
 ] as const;
 
+// ── 示範用權重 state ───────────────────────────────────────────────────────────
+
+interface DemoWeights {
+  fefo:          number;
+  urgency:       number;
+  order_time:    number;
+  customer_tier: number;
+  region:        number;
+}
+
+const DEMO_WEIGHT_DEFAULTS: DemoWeights = {
+  fefo:          30,
+  urgency:       25,
+  order_time:    15,
+  customer_tier: 20,
+  region:        10,
+};
+
+const DEMO_WEIGHT_LABELS: { key: keyof DemoWeights; label: string }[] = [
+  { key: 'fefo',          label: '先效期先出（FEFO）' },
+  { key: 'urgency',       label: '緊急度' },
+  { key: 'order_time',    label: '下單時間' },
+  { key: 'customer_tier', label: '客戶等級' },
+  { key: 'region',        label: '區域群聚' },
+];
+
 // ── 規則 enabled 欄位型別 ──────────────────────────────────────────────────────
 
 interface RuleEnabledState {
@@ -47,6 +73,9 @@ export const App: React.FC = () => {
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
   const [rulesLoading, setRulesLoading] = useState<boolean>(false);
   const [settingsChanged, setSettingsChanged] = useState<boolean>(false);
+
+  // 示範用權重（純前端 state，不影響分配引擎，重整後恢復預設）
+  const [demoWeights, setDemoWeights] = useState<DemoWeights>(DEMO_WEIGHT_DEFAULTS);
 
   const fetchRecommendations = async () => {
     try {
@@ -262,6 +291,38 @@ export const App: React.FC = () => {
     }
   };
 
+  // 示範用權重調整：拖曳其中一條時，其餘四條等比例縮放，總和維持 100
+  const handleDemoWeightChange = (changedKey: keyof DemoWeights, rawValue: number) => {
+    const newVal = Math.min(100, Math.max(0, rawValue));
+    const remaining = 100 - newVal;
+    const otherKeys = (Object.keys(demoWeights) as (keyof DemoWeights)[]).filter((k) => k !== changedKey);
+    const otherSum = otherKeys.reduce((acc, k) => acc + demoWeights[k], 0);
+
+    const next = { ...demoWeights, [changedKey]: newVal } as DemoWeights;
+    if (otherSum === 0) {
+      // 極端情況：其他全為 0，平均分配剩餘值
+      const avg = Math.floor(remaining / otherKeys.length);
+      otherKeys.forEach((k, i) => {
+        next[k] = i === otherKeys.length - 1
+          ? remaining - avg * (otherKeys.length - 1)
+          : avg;
+      });
+    } else {
+      // 等比例縮放
+      let distributed = 0;
+      otherKeys.forEach((k, i) => {
+        if (i === otherKeys.length - 1) {
+          next[k] = remaining - distributed;
+        } else {
+          const share = Math.round((demoWeights[k] / otherSum) * remaining);
+          next[k] = share;
+          distributed += share;
+        }
+      });
+    }
+    setDemoWeights(next);
+  };
+
   useEffect(() => {
     fetchRecommendations();
     fetchRuleEnabled();
@@ -376,6 +437,50 @@ export const App: React.FC = () => {
             ⚠️ 設定已更新，請按上方「執行分配引擎」以套用新規則到分配建議
           </p>
         )}
+
+        {/* ── 示範用權重調整區塊（純前端展示，不影響分配引擎）── */}
+        <div style={{ marginTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            <span style={{ fontSize: '0.9rem', color: '#cbd5e1', fontWeight: 500 }}>權重比例調整</span>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>（示範功能，尚未串接實際計算，僅供展示）</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.75rem' }}>
+            {DEMO_WEIGHT_LABELS.map(({ key, label }) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ width: '160px', fontSize: '0.83rem', color: '#94a3b8', flexShrink: 0 }}>{label}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={demoWeights[key]}
+                  onChange={(e) => handleDemoWeightChange(key, Number(e.target.value))}
+                  style={{ flex: 1, accentColor: '#6366f1', cursor: 'pointer' }}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={demoWeights[key]}
+                  onChange={(e) => handleDemoWeightChange(key, Number(e.target.value))}
+                  style={{
+                    width: '52px',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: '0.35rem',
+                    color: '#e2e8f0',
+                    fontSize: '0.83rem',
+                    padding: '0.2rem 0.4rem',
+                    textAlign: 'right',
+                  }}
+                />
+                <span style={{ fontSize: '0.78rem', color: '#64748b', width: '16px' }}>%</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: '0.6rem', fontSize: '0.8rem', color: demoWeights.fefo + demoWeights.urgency + demoWeights.order_time + demoWeights.customer_tier + demoWeights.region === 100 ? '#10b981' : '#f59e0b' }}>
+            合計：{demoWeights.fefo + demoWeights.urgency + demoWeights.order_time + demoWeights.customer_tier + demoWeights.region}%
+          </div>
+        </div>
       </section>
 
       {/* 區塊 1: 可直接確認 (Total Score >= 80) */}
