@@ -428,3 +428,56 @@ body {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
 }
+
+/* ── 卡片翻面（3D flip）─────────────────────────────────────────── */
+
+.card-flip-wrapper {
+  /* perspective 已在 JSX 內 style 設定，這裡只管佈局 */
+  display: flex;
+  flex-direction: column;
+}
+
+.card-flip-inner {
+  position: relative;
+  width: 100%;
+  /* 讓內層可以翻轉；高度由 card-face 撐開，
+     使用 min-height 避免翻轉時高度塌陷 */
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(0.45, 0, 0.55, 1);
+  /* 最小高度保持兩面一致，防止翻轉瞬間跳動 */
+  min-height: 420px;
+}
+
+.card-flip-wrapper.is-flipped .card-flip-inner {
+  transform: rotateY(180deg);
+}
+
+.card-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  /* 讓 card 本身的 display:flex / flex-direction:column 繼續生效 */
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  height: 100%;
+  overflow: hidden;
+}
+
+.card-back {
+  transform: rotateY(180deg);
+  /* 背面需要自行撐高，不依賴 absolute inset */
+}
+
+/* ── 查看詳情按鈕 ────────────────────────────────────────────────── */
+
+.btn-detail {
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.btn-detail:hover {
+  background: rgba(56, 189, 248, 0.2);
+}
