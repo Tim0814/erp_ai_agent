@@ -424,6 +424,68 @@ body {
   cursor: not-allowed;
 }
 
+/* ── 規則列（每條規則一整行）────────────────────────────────────── */
+
+.rules-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.rule-row {
+  display: grid;
+  /* 標籤固定寬 / 滑桿彈性 / 數字輸入框固定寬 */
+  grid-template-columns: 11rem 1fr 5rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.rule-row-name {
+  /* 覆寫原本 inline-flex 的 flex-wrap，確保單行對齊 */
+  white-space: nowrap;
+}
+
+/* ── 滑桿 ────────────────────────────────────────────────────────── */
+
+.rule-slider {
+  width: 100%;
+  height: 4px;
+  accent-color: #10b981;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.rule-slider:disabled,
+.rule-slider-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── 數字輸入框 ──────────────────────────────────────────────────── */
+
+.rule-number-input {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  font-family: inherit;
+  padding: 0.25rem 0.4rem;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.rule-number-input:focus {
+  border-color: #10b981;
+}
+
+.rule-number-input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }

@@ -23,12 +23,34 @@ interface RuleEnabledState {
   region_enabled: boolean;
 }
 
-const RULE_LABELS: { field: keyof RuleEnabledState; label: string }[] = [
-  { field: 'fefo_enabled',          label: '先效期先出（FEFO）' },
-  { field: 'urgency_enabled',       label: '緊急度' },
-  { field: 'order_time_enabled',    label: '下單時間' },
-  { field: 'customer_tier_enabled', label: '客戶等級' },
-  { field: 'region_enabled',        label: '區域群聚' },
+// ── 規則權重數值型別（純 UI，尚未串接後端）────────────────────────────────────
+interface RuleWeightState {
+  fefo:         number;
+  urgency:      number;
+  orderTime:    number;
+  customerTier: number;
+  region:       number;
+}
+
+// 預設權重（對應 lib/weights.ts 的 DEFAULT_WEIGHTS）
+const DEFAULT_RULE_WEIGHTS: RuleWeightState = {
+  fefo:         0.35,
+  urgency:      0.25,
+  orderTime:    0.12,
+  customerTier: 0.20,
+  region:       0.08,
+};
+
+const RULE_LABELS: {
+  enabledField: keyof RuleEnabledState;
+  weightField:  keyof RuleWeightState;
+  label: string;
+}[] = [
+  { enabledField: 'fefo_enabled',          weightField: 'fefo',         label: '先效期先出（FEFO）' },
+  { enabledField: 'urgency_enabled',       weightField: 'urgency',      label: '緊急度' },
+  { enabledField: 'order_time_enabled',    weightField: 'orderTime',    label: '下單時間' },
+  { enabledField: 'customer_tier_enabled', weightField: 'customerTier', label: '客戶等級' },
+  { enabledField: 'region_enabled',        weightField: 'region',       label: '區域群聚' },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -47,6 +69,9 @@ export const App: React.FC = () => {
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
   const [rulesLoading, setRulesLoading] = useState<boolean>(false);
   const [settingsChanged, setSettingsChanged] = useState<boolean>(false);
+
+  // 規則數值權重（純 UI local state，預設值來自 DEFAULT_WEIGHTS）
+  const [ruleWeights, setRuleWeights] = useState<RuleWeightState>(DEFAULT_RULE_WEIGHTS);
 
   // ── 同步 ERP 狀態 ──────────────────────────────────────────────────────────
   const [syncing, setSyncing] = useState<boolean>(false);
@@ -396,31 +421,71 @@ export const App: React.FC = () => {
         {ruleEnabled === null ? (
           <p className="rules-loading-hint">載入中…</p>
         ) : (
-          <div className="rules-checkboxes">
-            {RULE_LABELS.map(({ field, label }) => {
-              const checked = ruleEnabled[field];
-              // 當只剩最後一個啟用時，那個 checkbox 不可取消
+          <div className="rules-rows">
+            {RULE_LABELS.map(({ enabledField, weightField, label }) => {
+              const checked = ruleEnabled[enabledField];
               const isLastEnabled = checked && enabledCount === 1;
+              // slider 以整數 1–100 操作，儲存時換算回 0.01–1.00
+              const pct = Math.round(ruleWeights[weightField] * 100);
+
               return (
-                <label
-                  key={field}
-                  className={`rule-checkbox-label${isLastEnabled ? ' rule-checkbox-disabled' : ''}`}
-                  title={isLastEnabled ? '至少需保留一項規則啟用' : undefined}
-                >
+                <div key={enabledField} className="rule-row">
+                  {/* 左：勾選框 + 標籤 */}
+                  <label
+                    className={`rule-checkbox-label rule-row-name${isLastEnabled ? ' rule-checkbox-disabled' : ''}`}
+                    title={isLastEnabled ? '至少需保留一項規則啟用' : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={isLastEnabled || rulesLoading}
+                      onChange={(e) => handleRuleToggle(enabledField, e.target.checked)}
+                    />
+                    <span>{label}</span>
+                  </label>
+
+                  {/* 中：滑桿 */}
                   <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={isLastEnabled || rulesLoading}
-                    onChange={(e) => handleRuleToggle(field, e.target.checked)}
+                    type="range"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={pct}
+                    disabled={!checked}
+                    className={`rule-slider${!checked ? ' rule-slider-disabled' : ''}`}
+                    onChange={(e) => {
+                      const v = Number(e.target.value) / 100;
+                      setRuleWeights((prev) => ({ ...prev, [weightField]: v }));
+                      setSettingsChanged(true);
+                    }}
+                    title={checked ? `目前：${pct}` : '啟用後可調整'}
                   />
-                  <span>{label}</span>
-                </label>
+
+                  {/* 右：數字輸入框（直接輸入 0.01–1.00）*/}
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={1}
+                    step={0.01}
+                    value={ruleWeights[weightField].toFixed(2)}
+                    disabled={!checked}
+                    className={`rule-number-input${!checked ? ' rule-slider-disabled' : ''}`}
+                    onChange={(e) => {
+                      const raw = parseFloat(e.target.value);
+                      if (isNaN(raw)) return;
+                      const clamped = Math.min(1, Math.max(0.01, raw));
+                      setRuleWeights((prev) => ({ ...prev, [weightField]: clamped }));
+                      setSettingsChanged(true);
+                    }}
+                    title={checked ? `輸入 0.01 ~ 1.00` : '啟用後可調整'}
+                  />
+                </div>
               );
             })}
           </div>
         )}
         {settingsChanged && (
-          <p style={{ color: '#f59e0b', fontSize: '0.85rem', margin: '0.5rem 0 0' }}>
+          <p style={{ color: '#f59e0b', fontSize: '0.85rem', margin: '0.75rem 0 0' }}>
             ⚠️ 設定已更新，請按上方「執行分配引擎」以套用新規則到分配建議
           </p>
         )}
