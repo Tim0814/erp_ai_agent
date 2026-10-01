@@ -162,6 +162,15 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                     {reviewBadge.label}
                   </span>
                 )}
+                {/* 查看詳情按鈕：放在徽章正下方 */}
+                <button
+                  className="btn btn-sm btn-detail"
+                  onClick={() => setFlipped(true)}
+                  title="查看五維度雷達圖"
+                  style={{ marginTop: '0.1rem' }}
+                >
+                  <BarChart2 size={13} /> 詳情
+                </button>
               </div>
             </div>
 
@@ -268,14 +277,6 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                 <Ban size={14} /> 棄單
               </button>
             )}
-            {/* 查看詳情按鈕：翻至雷達圖背面 */}
-            <button
-              className="btn btn-sm btn-detail"
-              onClick={() => setFlipped(true)}
-              title="查看五維度雷達圖"
-            >
-              <BarChart2 size={14} /> 詳情
-            </button>
           </div>
         </div>
 
