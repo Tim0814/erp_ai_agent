@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Recommendation } from './types';
 import { RecommendationCard } from './components/RecommendationCard';
 import { OverrideModal } from './components/OverrideModal';
-import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, UserCheck, Trash2 } from 'lucide-react';
+import { Play, Download, RefreshCw, CheckCircle, AlertOctagon, Settings, UserCheck, Trash2, DatabaseZap } from 'lucide-react';
 
 // ── 操作者清單（假名，可自行修改）────────────────────────────────────────────
 const OPERATOR_LIST = [
@@ -47,6 +47,9 @@ export const App: React.FC = () => {
   const [ruleEnabled, setRuleEnabled] = useState<RuleEnabledState | null>(null);
   const [rulesLoading, setRulesLoading] = useState<boolean>(false);
   const [settingsChanged, setSettingsChanged] = useState<boolean>(false);
+
+  // ── 同步 ERP 狀態 ──────────────────────────────────────────────────────────
+  const [syncing, setSyncing] = useState<boolean>(false);
 
   const fetchRecommendations = async () => {
     try {
@@ -110,6 +113,40 @@ export const App: React.FC = () => {
       alert('無法連線到分配引擎 API，請確認後端服務是否正常啟動。');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── 一鍵同步 ERP 資料 ──────────────────────────────────────────────────────
+  const handleSyncErp = async () => {
+    const confirmed = window.confirm(
+      '確定要從 ERPNext 重新同步資料嗎？\n\n此操作將清空並重寫：商品、客戶、批次、庫存、訂單資料。\n分配建議歷史不受影響。',
+    );
+    if (!confirmed) return;
+
+    try {
+      setSyncing(true);
+      const res = await fetch('/api/sync-erp', { method: 'POST' });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.details || data.error || '同步失敗');
+      }
+
+      const s = data.summary ?? {};
+      alert(
+        `✅ ERP 資料同步完成！\n\n` +
+        `商品：${s.items ?? 0} 筆\n` +
+        `客戶：${s.customers ?? 0} 筆\n` +
+        `批次：${s.batches ?? 0} 筆\n` +
+        `庫存：${s.inventory ?? 0} 筆\n` +
+        `訂單：${s.sales_orders ?? 0} 筆\n` +
+        `訂單明細：${s.sales_order_items ?? 0} 筆\n\n` +
+        `請按「執行分配引擎」以重新計算分配建議。`,
+      );
+    } catch (err) {
+      alert(`ERP 同步失敗：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -284,7 +321,18 @@ export const App: React.FC = () => {
           <p>規則引擎加權評分 + LLM 白話解釋 + 人工覆寫稽核機制 (PoC Phase 1)</p>
         </div>
         <div className="action-bar">
-          <button className="btn btn-primary" onClick={handleRunAllocation} disabled={loading}>
+          {/* ── 一鍵同步 ERP 資料 ── */}
+          <button
+            className="btn btn-secondary"
+            onClick={handleSyncErp}
+            disabled={syncing || loading}
+            style={{ borderColor: 'rgba(56,189,248,0.4)', color: '#38bdf8' }}
+            title="從 ERPNext 同步最新商品、客戶、批次、庫存、訂單資料"
+          >
+            <DatabaseZap size={16} />
+            {syncing ? '同步中…' : '同步 ERP 資料'}
+          </button>
+          <button className="btn btn-primary" onClick={handleRunAllocation} disabled={loading || syncing}>
             <Play size={16} /> {loading ? '計算中...' : '執行分配引擎'}
           </button>
           <button className="btn btn-secondary" onClick={handleExportCSV}>
