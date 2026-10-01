@@ -83,7 +83,8 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
   onReject,
   onCancel,
 }) => {
-  const [flipped, setFlipped] = useState(false);
+  // showRadar：false = 正面長條圖，true = 背面雷達圖
+  const [showRadar, setShowRadar] = useState(false);
 
   const getStatusTheme = () => {
     if (rec.traffic_light === 'red') {
@@ -101,11 +102,11 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
 
   // 雷達圖資料
   const radarData = [
-    { subject: '先效期先出', value: Number(rec.fefo_score)          ?? 0 },
-    { subject: '緊急度',     value: Number(rec.urgency_score)       ?? 0 },
-    { subject: '下單時間',   value: Number(rec.order_time_score)    ?? 0 },
-    { subject: '客戶等級',   value: Number(rec.customer_tier_score) ?? 0 },
-    { subject: '區域群聚',   value: Number(rec.region_score)        ?? 0 },
+    { subject: '先效期先出', value: Number(rec.fefo_score)          || 0 },
+    { subject: '緊急度',     value: Number(rec.urgency_score)       || 0 },
+    { subject: '下單時間',   value: Number(rec.order_time_score)    || 0 },
+    { subject: '客戶等級',   value: Number(rec.customer_tier_score) || 0 },
+    { subject: '區域群聚',   value: Number(rec.region_score)        || 0 },
   ];
 
   // 一般核准 / 退回的審核小字
@@ -118,15 +119,11 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
   })();
 
   return (
-    /* 外層容器：固定高度 + perspective，讓 3D 翻轉有透視感 */
-    <div
-      className={`card-flip-wrapper ${flipped ? 'is-flipped' : ''}`}
-      style={{ perspective: '1000px' }}
-    >
-      <div className="card-flip-inner">
+    <div className={`card ${theme.cardClass}`}>
 
-        {/* ═══════════════════════════════ 正面 ═══════════════════════════════ */}
-        <div className={`card ${theme.cardClass} card-face card-front`}>
+      {/* ══════════════════ 正面：長條圖 ══════════════════ */}
+      {!showRadar && (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div>
             {/* 頂部：訂單 + 商品 + 總分 + 徽章 */}
             <div className="card-header">
@@ -150,6 +147,7 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                 </span>
               </div>
 
+              {/* 右上角：燈號徽章 + 審核徽章 + 詳情按鈕 */}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.35rem' }}>
                 <span className={`badge ${theme.badgeClass}`}>{theme.label}</span>
                 {reviewBadge && (
@@ -162,10 +160,9 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                     {reviewBadge.label}
                   </span>
                 )}
-                {/* 查看詳情按鈕：放在徽章正下方 */}
                 <button
                   className="btn btn-sm btn-detail"
-                  onClick={() => setFlipped(true)}
+                  onClick={() => setShowRadar(true)}
                   title="查看五維度雷達圖"
                   style={{ marginTop: '0.1rem' }}
                 >
@@ -247,7 +244,7 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
           </div>
 
           {/* 操作按鈕列 */}
-          <div className="card-actions">
+          <div className="card-actions" style={{ marginTop: 'auto' }}>
             <button
               className="btn btn-sm btn-approve"
               onClick={() => onApprove(rec.id)}
@@ -279,24 +276,26 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
             )}
           </div>
         </div>
+      )}
 
-        {/* ═══════════════════════════════ 背面 ═══════════════════════════════ */}
-        <div className={`card ${theme.cardClass} card-face card-back`}>
-          {/* 背面頂部：標題 + 返回按鈕 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+      {/* ══════════════════ 背面：雷達圖 ══════════════════ */}
+      {showRadar && (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* 頂部：標題 + 返回按鈕 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
             <div>
               <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>
                 {rec.sales_order}
                 <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', color: '#94a3b8' }}>#{rec.item_code}</span>
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.1rem' }}>
+              <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.15rem' }}>
                 五維度綜合評分雷達圖
               </div>
             </div>
             <button
               className="btn btn-sm btn-secondary"
-              onClick={() => setFlipped(false)}
-              title="返回"
+              onClick={() => setShowRadar(false)}
+              title="返回長條圖"
               style={{ flexShrink: 0 }}
             >
               <ArrowLeft size={14} /> 返回
@@ -304,33 +303,31 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
           </div>
 
           {/* 雷達圖 */}
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ResponsiveContainer width="100%" height={240}>
-              <RadarChart data={radarData} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
-                <PolarGrid stroke="rgba(255,255,255,0.1)" />
-                <PolarAngleAxis
-                  dataKey="subject"
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
-                />
-                <Radar
-                  name="分數"
-                  dataKey="value"
-                  stroke="#38bdf8"
-                  fill="#38bdf8"
-                  fillOpacity={0.25}
-                  dot={{ r: 3, fill: '#38bdf8', strokeWidth: 0 }}
-                />
-                <Tooltip content={<RadarTooltip />} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <RadarChart data={radarData} margin={{ top: 10, right: 24, bottom: 10, left: 24 }}>
+              <PolarGrid stroke="rgba(255,255,255,0.1)" />
+              <PolarAngleAxis
+                dataKey="subject"
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+              />
+              <Radar
+                name="分數"
+                dataKey="value"
+                stroke="#38bdf8"
+                fill="#38bdf8"
+                fillOpacity={0.25}
+                dot={{ r: 3, fill: '#38bdf8', strokeWidth: 0 }}
+              />
+              <Tooltip content={<RadarTooltip />} />
+            </RadarChart>
+          </ResponsiveContainer>
 
-          {/* 背面底部：五維度數字摘要 */}
+          {/* 底部：五維度數字摘要 */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(5, 1fr)',
             gap: '0.4rem',
-            marginTop: '0.5rem',
+            marginTop: '0.75rem',
           }}>
             {radarData.map(({ subject, value }) => (
               <div key={subject} style={{
@@ -350,8 +347,8 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
             ))}
           </div>
         </div>
+      )}
 
-      </div>
     </div>
   );
 };
