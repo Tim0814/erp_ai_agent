@@ -38,7 +38,7 @@ function getReviewBadge(
     return { label: '✅ 已核准', color: '#10b981', bg: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.35)' };
   }
   if (status === 'approved' && isOverridden) {
-    return { label: '🔄 已覆寫核准', color: '#60a5fa', bg: 'rgba(96,165,250,0.15)', border: 'rgba(96,165,250,0.35)' };
+    return { label: '✏️ 已覆寫核准', color: '#f59e0b', bg: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.5)' };
   }
   if (status === 'rejected') {
     return { label: '❌ 已退回', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.25)' };
@@ -230,18 +230,57 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
           💡 <strong>AI 說明：</strong> {rec.rationale || '系統評估完成'}
         </div>
 
-        {/* 需求 C：審核歷程一行灰色小字（status !== 'pending' 才顯示） */}
-        {auditLine && (
+        {/* 覆寫訊息：is_overridden 時改用明顯的黃色色塊，其餘審核紀錄維持灰色小字 */}
+        {rec.status === 'approved' && rec.is_overridden ? (
           <div
             style={{
-              fontSize: '0.72rem',
-              color: '#475569',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.3rem',
+              background: 'rgba(245,158,11,0.12)',
+              border: '1px solid rgba(245,158,11,0.45)',
+              borderLeft: '3px solid #f59e0b',
+              borderRadius: '6px',
+              padding: '0.55rem 0.75rem',
               marginBottom: '0.75rem',
-              lineHeight: 1.4,
             }}
           >
-            {auditLine}
+            {/* 頂列：圖示 + 操作者 + 時間 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <Edit3 size={13} color="#f59e0b" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#f59e0b' }}>
+                人工覆寫核准
+              </span>
+              <span style={{ fontSize: '0.72rem', color: '#fbbf24', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                {rec.overridden_by || '—'} · {formatDatetime(rec.overridden_at)}
+              </span>
+            </div>
+            {/* 覆寫原因 */}
+            <p
+              style={{
+                fontSize: '0.82rem',
+                color: '#fef3c7',
+                margin: 0,
+                lineHeight: 1.5,
+                wordBreak: 'break-all',
+              }}
+            >
+              原因：{rec.override_reason || '（未填寫）'}
+            </p>
           </div>
+        ) : (
+          auditLine && (
+            <div
+              style={{
+                fontSize: '0.72rem',
+                color: '#475569',
+                marginBottom: '0.75rem',
+                lineHeight: 1.4,
+              }}
+            >
+              {auditLine}
+            </div>
+          )
         )}
       </div>
 
