@@ -3,7 +3,7 @@ import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip,
 } from 'recharts';
 import { Recommendation } from '../types';
-import { CheckCircle2, Edit3, XCircle, AlertTriangle, Ban, BarChart2, ArrowLeft } from 'lucide-react';
+import { CheckCircle2, Edit3, XCircle, AlertTriangle, Ban, BarChart2, ArrowLeft, CheckCheck, X } from 'lucide-react';
 
 interface RecommendationCardProps {
   rec: Recommendation;
@@ -109,14 +109,13 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
     { subject: '區域群聚',   value: Number(rec.region_score)        || 0 },
   ];
 
-  // 一般核准 / 退回的審核小字
-  const auditLine = (() => {
-    if (rec.status === 'approved' && !rec.is_overridden)
-      return `由 ${rec.reviewed_by || '—'} 於 ${formatDatetime(rec.reviewed_at)} 核准`;
-    if (rec.status === 'rejected')
-      return `由 ${rec.reviewed_by || '—'} 於 ${formatDatetime(rec.reviewed_at)} 退回`;
-    return null;
-  })();
+  // 核准 / 退回的操作者與時間（覆寫已由獨立色塊處理，不走此分支）
+  const auditApproved = rec.status === 'approved' && !rec.is_overridden
+    ? { by: rec.reviewed_by || '—', at: formatDatetime(rec.reviewed_at) }
+    : null;
+  const auditRejected = rec.status === 'rejected'
+    ? { by: rec.reviewed_by || '—', at: formatDatetime(rec.reviewed_at) }
+    : null;
 
   return (
     <div className={`card ${theme.cardClass}`}>
@@ -235,11 +234,41 @@ export const RecommendationCard: React.FC<RecommendationCardProps> = ({
                 </p>
               </div>
             ) : (
-              auditLine && (
-                <div style={{ fontSize: '0.72rem', color: '#475569', marginBottom: '0.75rem', lineHeight: 1.4 }}>
-                  {auditLine}
+              /* 核准色塊（綠色）*/
+              auditApproved ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'rgba(16,185,129,0.12)',
+                  border: '1px solid rgba(16,185,129,0.4)',
+                  borderLeft: '3px solid #10b981',
+                  borderRadius: '6px',
+                  padding: '0.5rem 0.75rem',
+                  marginBottom: '0.75rem',
+                }}>
+                  <CheckCheck size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#10b981' }}>核准</span>
+                  <span style={{ fontSize: '0.82rem', color: '#6ee7b7' }}>
+                    由 <strong>{auditApproved.by}</strong> 於 {auditApproved.at}
+                  </span>
                 </div>
-              )
+              ) : auditRejected ? (
+                /* 退回色塊（紅色）*/
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  background: 'rgba(239,68,68,0.10)',
+                  border: '1px solid rgba(239,68,68,0.38)',
+                  borderLeft: '3px solid #ef4444',
+                  borderRadius: '6px',
+                  padding: '0.5rem 0.75rem',
+                  marginBottom: '0.75rem',
+                }}>
+                  <X size={14} color="#ef4444" style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#ef4444' }}>退回</span>
+                  <span style={{ fontSize: '0.82rem', color: '#fca5a5' }}>
+                    由 <strong>{auditRejected.by}</strong> 於 {auditRejected.at}
+                  </span>
+                </div>
+              ) : null
             )}
           </div>
 
